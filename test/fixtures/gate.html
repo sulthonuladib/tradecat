@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>gate.com orderbook fixture</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var rate = params.get('rate');
+    if (rate) {
+      try {
+        localStorage.setItem('tradecat:idr.rate', JSON.stringify(Number(rate)));
+        localStorage.setItem('tradecat:idr.updatedAt', JSON.stringify(Date.now()));
+        localStorage.setItem('tradecat:idr.source', JSON.stringify('fixture'));
+      } catch (e) {}
+    }
+    window.__TRADECAT_SITE__ = params.get('site') || 'gate';
+  })();
+</script>
+<style>
+  body { background: #0b0e11; color: #eaecef; font: 12px/1.6 ui-sans-serif, sans-serif; }
+  .ob { width: 380px; }
+  .head, .row { display: flex; align-items: center; }
+  .head > div, .row > div { flex: 1; }
+  .head { color: #848e9c; font-size: 11px; }
+  .row > div.total { position: relative; text-align: right; }
+  .row > div.total .bar { position: absolute; right: 0; top: 2px; bottom: 2px; background: rgba(248, 81, 73, .12); }
+  .row > div.total span { position: relative; }
+  .mid { color: #2ebd85; font-size: 18px; margin: 10px 0; }
+  .orders { margin-top: 48px; }
+  table { border-collapse: collapse; }
+  td, th { padding: 2px 8px; text-align: right; }
+</style>
+</head>
+<body>
+<div class="ob">
+  <div class="head">
+    <div>Price (USDT)</div>
+    <div>Amount (BTC)</div>
+    <div>Total (USDT)</div>
+  </div>
+  <div class="asks">
+    <div class="row"><div class="price"><span class="p">78,048.9</span></div><div class="amount"><span class="a">0.000380</span></div><div class="total"><div class="bar" style="width:12%"></div><span class="t">29.65</span></div></div>
+    <div class="row"><div class="price"><span class="p">78,048.8</span></div><div class="amount"><span class="a">0.000500</span></div><div class="total"><div class="bar" style="width:15%"></div><span class="t">39.02</span></div></div>
+    <div class="row"><div class="price"><span class="p">78,048.0</span></div><div class="amount"><span class="a">0.030000</span></div><div class="total"><div class="bar" style="width:20%"></div><span class="t">2.34K</span></div></div>
+    <div class="row"><div class="price"><span class="p">78,043.7</span></div><div class="amount"><span class="a">3.413309</span></div><div class="total"><div class="bar" style="width:90%"></div><span class="t">266.38K</span></div></div>
+  </div>
+  <div class="mid">78,043.7 <span>≈ $78,043.7</span></div>
+  <div class="bids">
+    <div class="row"><div class="price"><span class="p">78,043.6</span></div><div class="amount"><span class="a">0.048639</span></div><div class="total"><div class="bar" style="width:10%"></div><span class="t">3.79K</span></div></div>
+    <div class="row"><div class="price"><span class="p">78,043.4</span></div><div class="amount"><span class="a">0.160765</span></div><div class="total"><div class="bar" style="width:12%"></div><span class="t">12.54K</span></div></div>
+  </div>
+</div>
+
+<!-- A different table with different headers: must NOT be converted. -->
+<div class="orders">
+  <table>
+    <thead><tr><th>Price</th><th>Amount</th><th>Value</th></tr></thead>
+    <tbody><tr><td>10.00</td><td>2.00</td><td>20.00</td></tr></tbody>
+  </table>
+</div>
+
+<script src="/dist/tradecat-idr.user.js"></script>
+<script>
+  // 1) live price flash on the first ask
+  setTimeout(function () {
+    var row = document.querySelector('.asks .row');
+    row.querySelector('.p').textContent = '79,000.0';
+    row.querySelector('.t').textContent = '30.02';
+  }, 900);
+
+  // 2) framework style re-render: the whole side is replaced
+  setTimeout(function () {
+    document.querySelector('.asks').innerHTML =
+      '<div class="row"><div class="price"><span class="p">77,500.0</span></div><div class="amount"><span class="a">0.000400</span></div><div class="total"><span class="t">31.00</span></div></div>' +
+      '<div class="row"><div class="price"><span class="p">77,499.9</span></div><div class="amount"><span class="a">0.001000</span></div><div class="total"><span class="t">77.50</span></div></div>';
+  }, 1800);
+</script>
+</body>
+</html>

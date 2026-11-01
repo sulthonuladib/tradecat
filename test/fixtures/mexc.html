@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mexc.fm orderbook fixture</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var rate = params.get('rate');
+    if (rate) {
+      try {
+        localStorage.setItem('tradecat:idr.rate', JSON.stringify(Number(rate)));
+        localStorage.setItem('tradecat:idr.updatedAt', JSON.stringify(Date.now()));
+        localStorage.setItem('tradecat:idr.source', JSON.stringify('fixture'));
+      } catch (e) {}
+    }
+    window.__TRADECAT_SITE__ = params.get('site') || 'mexc';
+  })();
+</script>
+<style>
+  body { background: #121212; color: #eaecef; font: 12px/1.6 ui-sans-serif, sans-serif; }
+  table { border-collapse: collapse; width: 420px; }
+  th { color: #848e9c; font-size: 11px; font-weight: 400; text-align: right; }
+  td { text-align: right; font-variant-numeric: tabular-nums; }
+  .trades { margin-top: 40px; }
+</style>
+</head>
+<body>
+<table class="orderbook">
+  <thead>
+    <tr><th>Price (USDT)</th><th>Amount (BTC)</th><th>Total (USDT)</th></tr>
+  </thead>
+  <tbody class="asks">
+    <tr><td><span>78,044.56</span></td><td><span>0.04988555</span></td><td><span>3,893.29</span></td></tr>
+    <tr><td><span>78,044.43</span></td><td><span>0.07687200</span></td><td><span>5,999.43</span></td></tr>
+    <tr><td><span>78,042.33</span></td><td><span>0.04988555</span></td><td><span>3,893.18</span></td></tr>
+    <tr><td><span>78,037.61</span></td><td><span>0.00351408</span></td><td><span>274.23</span></td></tr>
+  </tbody>
+  <tbody class="bids">
+    <tr><td><span>78,036.27</span></td><td><span>0.04988555</span></td><td><span>3,892.88</span></td></tr>
+    <tr><td><span>78,035.52</span></td><td><span>0.04988555</span></td><td><span>3,892.84</span></td></tr>
+  </tbody>
+</table>
+
+<!-- Market trades: price/amount/time must be left alone. -->
+<table class="trades">
+  <thead><tr><th>Price (USDT)</th><th>Amount (BTC)</th><th>Time</th></tr></thead>
+  <tbody>
+    <tr><td><span>78,036.27</span></td><td><span>0.0043</span></td><td><span>12:34:56</span></td></tr>
+  </tbody>
+</table>
+
+<script src="/dist/tradecat-idr.user.js"></script>
+<script>
+  setTimeout(function () {
+    document.querySelector('.bids tr td span').textContent = '78,000.00';
+  }, 1200);
+</script>
+</body>
+</html>

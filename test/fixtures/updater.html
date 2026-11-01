@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rate updater fixture</title>
+<script>
+  window.__GM__ = {};
+  window.GM_getValue = function (key, fallback) {
+    return Object.prototype.hasOwnProperty.call(window.__GM__, key) ? window.__GM__[key] : fallback;
+  };
+  window.GM_setValue = function (key, value) {
+    window.__GM__[key] = value;
+  };
+  window.GM_log = function () {};
+  window.GM_notification = function () {};
+  window.GM_xmlhttpRequest = function (details) {
+    setTimeout(function () {
+      if (details.url.indexOf('indodax') >= 0) {
+        details.onload({ status: 200, responseText: JSON.stringify({ ticker: { last: '19123' } }) });
+      } else {
+        details.onerror(new Error('offline'));
+      }
+    }, 10);
+  };
+</script>
+</head>
+<body>
+<script src="/dist/tradecat-rate-updater.user.js"></script>
+<script>
+  setTimeout(function () {
+    document.title = JSON.stringify(window.__GM__);
+  }, 600);
+</script>
+</body>
+</html>

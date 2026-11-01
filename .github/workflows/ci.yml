@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Build userscripts
+        run: bun run build
+      - name: Unit tests
+        run: bun test test/format.test.ts
+      - name: Typecheck
+        run: bunx tsc --noEmit
+      - name: Install chromium (for DOM tests)
+        run: sudo apt-get update && sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+      - name: DOM tests
+        run: bun run test/dom.test.mjs

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tiny price fixture</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var rate = params.get('rate');
+    if (rate) {
+      try {
+        localStorage.setItem('tradecat:idr.rate', JSON.stringify(Number(rate)));
+        localStorage.setItem('tradecat:idr.updatedAt', JSON.stringify(Date.now()));
+        localStorage.setItem('tradecat:idr.source', JSON.stringify('fixture'));
+      } catch (e) {}
+    }
+    window.__TRADECAT_SITE__ = params.get('site') || 'gate';
+  })();
+</script>
+<style>
+  body { background: #0b0e11; color: #eaecef; font: 12px/1.6 ui-sans-serif, sans-serif; }
+  .ob { width: 460px; }
+  .head, .row { display: flex; }
+  .head > span, .row > span { flex: 1; }
+  .head { color: #848e9c; font-size: 11px; }
+  .row > span:last-child { text-align: right; }
+</style>
+</head>
+<body>
+<!-- A pair whose price has 9 decimals: 0.000000123 USDT -->
+<div class="ob">
+  <div class="head">
+    <span>Price (USDT)</span><span>Amount (SHIB)</span><span>Total (USDT)</span><span>Fee</span>
+  </div>
+  <div class="rows">
+    <div class="row">
+      <span class="p">0.000000123</span><span class="a">12,276,422,764.23</span><span class="t">1.51K</span><span class="f">0.0015</span>
+    </div>
+    <div class="row">
+      <span class="p">0.000000123</span><span class="a">1,219,512.19</span><span class="t">0.15</span><span class="f">0.0002</span>
+    </div>
+    <div class="row">
+      <span class="p">0.000000124</span><span class="a">1,000,000.00</span><span class="t">0.124</span><span class="f">0.0001</span>
+    </div>
+  </div>
+</div>
+
+<script src="/dist/tradecat-idr.user.js"></script>
+</body>
+</html>

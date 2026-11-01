@@ -1,0 +1,89 @@
+// ==UserScript==
+// @name         TradeCat · IDR Orderbook
+// @namespace    https://github.com/tradecat/tradecat-idr
+// @version      0.1.0
+// @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
+// @author       tradecat
+// @license      MIT
+// @match        https://www.gate.com/trade/*
+// @match        https://gate.com/trade/*
+// @match        https://www.gate.io/trade/*
+// @match        https://gate.io/trade/*
+// @match        https://www.mexc.com/exchange/*
+// @match        https://mexc.com/exchange/*
+// @match        https://www.mexc.fm/exchange/*
+// @match        https://mexc.fm/exchange/*
+// @run-at       document-start
+// @noframes
+// @storageName  tradecat
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
+// @grant        GM_notification
+// @connect      api.gateio.ws
+// @connect      www.mexc.fm
+// @connect      www.mexc.com
+// @connect      indodax.com
+// @connect      api.coingecko.com
+// ==/UserScript==
+
+/* ==UserConfig==
+idr:
+  fallbackRate:
+    title: Fallback USDT → IDR rate
+    description: Used only when no cached rate exists. Run the "TradeCat · USDT/IDR Rate Updater" script to keep a real rate in shared storage.
+    type: number
+    default: 18000
+    min: 1
+  priceFormat:
+    title: IDR price format
+    description: full = 1.407.000.000 · compact = 1,41 M
+    type: select
+    default: full
+    values: [full, compact]
+  volumeFormat:
+    title: IDR volume format
+    description: auto = full when it fits, compact when the number gets long
+    type: select
+    default: full
+    values: [full, compact, auto]
+  prefix:
+    title: IDR prefix
+    description: Text placed before converted numbers. Leave empty for plain numbers, or use "Rp".
+    type: text
+    default: ""
+  showPrice:
+    title: Show IDR next to the orderbook price
+    type: checkbox
+    default: true
+  convertTotal:
+    title: Replace "Total (USDT)" with IDR volume
+    type: checkbox
+    default: true
+  ttlHours:
+    title: Rate cache TTL (hours)
+    description: How long a cached rate is considered fresh.
+    type: number
+    default: 6
+    min: 1
+  enableNetworkRate:
+    title: Let this script fetch the rate itself
+    description: Off by default - the rate updater script is meant to own that job.
+    type: checkbox
+    default: false
+coin:
+  panel:
+    title: Show deposit / withdraw panel
+    type: checkbox
+    default: true
+  showChains:
+    title: Show per-chain status
+    type: checkbox
+    default: true
+  position:
+    title: Panel position
+    type: select
+    default: bottom-left
+    values: [bottom-left, bottom-right, top-left, top-right]
+==/UserConfig== */

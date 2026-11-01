@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GM storage fixture</title>
+<script>
+  // Simulates ScriptCat's GM storage (shared via @storageName tradecat).
+  window.__GM__ = {
+    'idr.rate': 19000,
+    'idr.updatedAt': Date.now(),
+    'idr.source': 'tradecat-rate-updater',
+  };
+  window.GM_getValue = function (key, fallback) {
+    return Object.prototype.hasOwnProperty.call(window.__GM__, key) ? window.__GM__[key] : fallback;
+  };
+  window.GM_setValue = function (key, value) {
+    window.__GM__[key] = value;
+  };
+  window.GM_registerMenuCommand = function () {};
+  window.GM_notification = function () {};
+  window.__TRADECAT_SITE__ = 'mexc';
+</script>
+<style>
+  body { background: #121212; color: #eaecef; font: 12px/1.6 sans-serif; }
+  .hd, .r { display: flex; width: 380px; }
+  .hd > span, .r > span { flex: 1; }
+  .r > span:last-child { text-align: right; }
+</style>
+</head>
+<body>
+<div class="book">
+  <div class="hd"><span>Price (USDT)</span><span>Amount (BTC)</span><span>Total (USDT)</span></div>
+  <div class="rows">
+    <div class="r"><span>78,043.60</span><span>0.04863900</span><span>3,795.99</span></div>
+    <div class="r"><span>78,043.40</span><span>0.16076500</span><span>12,546.51</span></div>
+  </div>
+</div>
+<script src="/dist/tradecat-idr.user.js"></script>
+</body>
+</html>

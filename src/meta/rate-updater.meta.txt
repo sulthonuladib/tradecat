@@ -1,0 +1,18 @@
+// ==UserScript==
+// @name         TradeCat · USDT/IDR Rate Updater
+// @namespace    https://github.com/tradecat/tradecat-idr
+// @version      0.1.0
+// @description  Periodically refresh the shared USDT → IDR rate (Indodax, then CoinGecko) that the TradeCat orderbook script reads from storage.
+// @author       tradecat
+// @license      MIT
+// @background
+// @crontab      0 */2 * * *
+// @storageName  tradecat
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
+// @grant        GM_notification
+// @grant        GM_log
+// @connect      indodax.com
+// @connect      api.coingecko.com
+// ==/UserScript==

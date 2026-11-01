@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>adversarial layout fixture</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var rate = params.get('rate');
+    if (rate) {
+      try {
+        localStorage.setItem('tradecat:idr.rate', JSON.stringify(Number(rate)));
+        localStorage.setItem('tradecat:idr.updatedAt', JSON.stringify(Date.now()));
+        localStorage.setItem('tradecat:idr.source', JSON.stringify('fixture'));
+      } catch (e) {}
+    }
+    window.__TRADECAT_SITE__ = params.get('site') || 'gate';
+  })();
+</script>
+<style>
+  body { background: #0b0e11; color: #eaecef; font: 12px/1.6 ui-sans-serif, sans-serif; }
+  .book { width: 420px; }
+  .hd, .r { display: flex; }
+  .c { flex: 1; }
+  .c:last-child { text-align: right; }
+  svg { width: 8px; height: 8px; fill: #848e9c; }
+  .flash { display: inline-block; width: 4px; height: 4px; background: #f6465d; }
+</style>
+</head>
+<body>
+<div class="book">
+  <!-- header with a sort arrow inside the same element -->
+  <div class="hd">
+    <div class="c">Price (USDT) <svg viewBox="0 0 8 8"><path d="M0 0h8L4 8z"></path></svg></div>
+    <div class="c">Amount (BTC)</div>
+    <div class="c">Total&nbsp;(USDT)</div>
+  </div>
+  <div class="rows">
+    <!-- space separated thousands + a decorative icon next to the number -->
+    <div class="r">
+      <div class="c"><span class="num">78 048.90</span><i class="flash"></i></div>
+      <div class="c"><span class="num">0.000380</span></div>
+      <div class="c"><span class="num">29.66</span></div>
+    </div>
+    <!-- price with a unit suffix, deeply nested cells -->
+    <div class="r">
+      <div class="c"><div><div><span class="num">78,048.90 USDT</span></div></div></div>
+      <div class="c"><div><span class="num">0.001000</span></div></div>
+      <div class="c"><div><span class="num">78.05</span></div></div>
+    </div>
+    <!-- narrow no-break space separator + lowercase k suffix -->
+    <div class="r">
+      <div class="c"><span class="num">78&#8239;048.90</span></div>
+      <div class="c"><span class="num">2.500000</span></div>
+      <div class="c"><span class="num">195.12k</span></div>
+    </div>
+  </div>
+</div>
+
+<script src="/dist/tradecat-idr.user.js"></script>
+</body>
+</html>
