@@ -148,6 +148,38 @@ Copy element*) and the rule can be extended.
 
 ---
 
+## Releasing & updates
+
+ScriptCat updates work like this (see the [metadata docs](https://docs.scriptcat.org/en/docs/dev/meta/)):
+
+- it fetches `@updateURL` and compares the `@version` in that file's metadata
+  block with the installed version;
+- **`@updateURL` only works when `@downloadURL` is also set** — both are
+  configured in this repo and point at the raw `dist/` files on `main`;
+- a newer `@version` makes ScriptCat show an update prompt (or update silently,
+  depending on the dashboard setting).
+
+So the release procedure is: bump → build → commit → push.
+
+```bash
+bun run bump 0.2.1     # updates both @version blocks + package.json, then builds
+# add a CHANGELOG.md entry, then:
+git add -A && git commit -m "Release 0.2.1" && git push
+```
+
+Notes:
+
+- The **version must change**, otherwise nothing is offered even though `dist/`
+  changed. This is why `bun run bump` exists — it is easy to forget.
+- The check happens against the remote metadata, so `dist/` has to be committed
+  (it is) for a GitHub install to ever see an update.
+- Local installs (**Import from file**) do not auto-update — re-import the file,
+  or install from the raw URL instead.
+- Manual check: ScriptCat dashboard → script → **Check update**; the auto-check
+  interval lives in the extension settings.
+- Both scripts are versioned in lockstep, so an update prompt for the rate
+  updater appears at the same time as the main script.
+
 ## Development
 
 ```bash

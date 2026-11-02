@@ -132,6 +132,13 @@ localStorage.setItem('tradecat:idr.source', JSON.stringify('my-source'));
 
 ## Troubleshooting
 
+**I installed it, but I don't get updates.**
+ScriptCat only offers an update when the remote `@version` is higher than the
+installed one. If you installed by **Import from file**, updates never apply —
+reinstall from the raw URL instead (dashboard → **+** → *Import from URL*), which
+keeps `@updateURL`/`@downloadURL` pointing at this repo. You can always force a
+check: dashboard → script → **Check update**.
+
 **Prices are not converted.**
 Run `TradeCat.describe()` (see step 3). If `rows: 0`, the exchange changed the
 orderbook markup in a way the `price × amount ≈ total` rule does not recognise.
