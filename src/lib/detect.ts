@@ -32,6 +32,7 @@ export interface OrderRow {
   amount: Leaf | null;
   total: Leaf;
   priceCell: HTMLElement;
+  amountCell: HTMLElement | null;
   totalCell: HTMLElement;
   /** Column layout key, e.g. "0,1,2" - rows with the same key form one list. */
   key: string;
@@ -121,9 +122,38 @@ export function toOrderRow(row: HTMLElement, triple: Triple): OrderRow {
     amount: triple.amount,
     total: triple.total,
     priceCell: cellOf(triple.price.el, row),
+    amountCell: cellOf(triple.amount.el, row),
     totalCell: cellOf(triple.total.el, row),
     key: triple.key,
   };
+}
+
+/**
+ * Re-derive a known row against its current DOM.
+ *
+ * Exchanges replace the cells inside a row on every update (React sets
+ * `textContent`, gate swaps animated nodes), so element references captured a
+ * moment ago can be detached. The column layout key is stable, so the numbers
+ * are re-read and mapped positionally, with a full triple check as fallback.
+ */
+export function refreshRow(row: OrderRow): OrderRow | null {
+  if (!row.row.isConnected) return null;
+
+  const leaves = leavesOf(row.row, MAX_ROW_NUMBERS + 2);
+  const [priceIndex = 0, amountIndex = 1, totalIndex = 2] = row.key.split(',').map(Number);
+  const price = leaves[priceIndex];
+  const amount = leaves[amountIndex];
+  const total = leaves[totalIndex];
+  if (price && amount && total) {
+    return toOrderRow(row.row, {
+      price,
+      amount,
+      total,
+      key: row.key,
+      span: totalIndex - priceIndex,
+    });
+  }
+  return rowTriple(row.row);
 }
 
 /** Does this row's numbers still form a valid triple? */
@@ -194,35 +224,60 @@ export function detectRowGroups(
     );
     if (kids.length < minRows || kids.length > 96) continue;
 
-    const candidates: OrderRow[] = [];
-    let rowLikeKids = 0;
-
+    // A row has a handful of numbers; a two-side wrapper has dozens.
+    const numbered: Array<{ kid: HTMLElement; own: Leaf[]; triple: Triple | null }> = [];
+    let tooMany = false;
     for (const kid of kids) {
       const own = numbers.filter((leaf) => kid.contains(leaf.el));
       if (own.length === 0) continue;
-      // A row has a handful of numbers; a two-side wrapper has dozens.
       if (own.length > MAX_ROW_NUMBERS) {
-        rowLikeKids = 0;
+        tooMany = true;
         break;
       }
       if (own.length < 2) continue;
-      const triple = findTriple(own);
-      if (!triple) continue;
-      rowLikeKids += 1;
-      candidates.push(toOrderRow(kid, triple));
+      numbered.push({ kid, own, triple: findTriple(own) });
     }
+    if (tooMany) continue;
 
-    if (rowLikeKids < minRows) continue;
     // Almost every child of a real row list is a row. A wrapper that merely
     // holds the two sides (plus a header / mid price) has a much lower ratio,
     // and treating it as a "row list" would put badges on whole side panels.
-    if (rowLikeKids / kids.length < 0.6) continue;
+    if (numbered.length / kids.length < 0.6) continue;
+
+    const candidates = numbered
+      .filter((entry): entry is { kid: HTMLElement; own: Leaf[]; triple: Triple } => entry.triple !== null)
+      .map((entry) => toOrderRow(entry.kid, entry.triple));
+    if (candidates.length < minRows) continue;
 
     const key = dominantKey(candidates);
     if (!key) continue;
-    const rows = candidates.filter((row) => row.key === key);
-    if (rows.length < minRows) continue;
+    const [priceIndex, amountIndex, totalIndex] = key.split(',').map(Number);
 
+    // Every row shares the column layout, so a row whose numbers are caught
+    // mid-animation (gate swaps amount/total text on each tick) can still be
+    // mapped positionally instead of being dropped for a frame.
+    const rows: OrderRow[] = [];
+    for (const entry of numbered) {
+      if (entry.triple && entry.triple.key === key) {
+        rows.push(toOrderRow(entry.kid, entry.triple));
+        continue;
+      }
+      const price = entry.own[priceIndex ?? 0];
+      const amount = entry.own[amountIndex ?? 1];
+      const total = entry.own[totalIndex ?? 2];
+      if (!price || !amount || !total) continue;
+      rows.push(
+        toOrderRow(entry.kid, {
+          price,
+          amount,
+          total,
+          key,
+          span: (totalIndex ?? 2) - (priceIndex ?? 0),
+        }),
+      );
+    }
+
+    if (rows.length < minRows) continue;
     groups.push({ parent, rows });
   }
 

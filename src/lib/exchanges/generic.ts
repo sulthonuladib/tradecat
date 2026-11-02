@@ -6,7 +6,7 @@ import type { ExchangeAdapter } from './types';
 
 export const genericAdapter: ExchangeAdapter = {
   id: 'generic',
-  cacheMs: 1500,
+  cacheMs: 800,
   locate(doc) {
     const scope = doc.body;
     if (!scope) return null;

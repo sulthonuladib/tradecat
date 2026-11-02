@@ -80,7 +80,26 @@ export function isVisible(el: HTMLElement): boolean {
   return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
 }
 
-/** Collect elements that directly hold a short piece of text. */
+/**
+ * Text that belongs to the element itself, ignoring child elements.
+ *
+ * Exchanges mix text and markup inside one cell all the time: gate's amount cell
+ * is `<div>4.904710 <div class="animating"/></div>`, so the number lives in a
+ * direct text node and a "leaf element only" walk would miss it.
+ */
+export function ownText(el: Element): string {
+  let out = '';
+  el.childNodes.forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE) out += node.textContent ?? '';
+  });
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Collect elements that own a short piece of text (their direct text nodes).
+ * Children are still visited, so mixed cells expose both the number they own
+ * and any numbers nested in them.
+ */
 export function walkLeaves(root: Element, out: HTMLElement[], maxLeaves = 1200, maxNodes = 20000): void {
   let visited = 0;
   const filter: NodeFilter = {
@@ -91,17 +110,12 @@ export function walkLeaves(root: Element, out: HTMLElement[], maxLeaves = 1200, 
       if (SKIP_TAGS.has(el.tagName)) return NodeFilter.FILTER_REJECT;
       if (el.classList.contains(INJECTED)) return NodeFilter.FILTER_REJECT;
 
-      const kids = el.children;
-      for (let index = 0; index < kids.length; index += 1) {
-        const kid = kids[index];
-        if (kid && !kid.classList.contains(INJECTED)) return NodeFilter.FILTER_SKIP;
+      const text = ownText(el);
+      if (text && text.length <= 32) {
+        out.push(el);
+        return out.length >= maxLeaves ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
       }
-
-      const text = cleanText(el);
-      if (!text || text.length > 32) return NodeFilter.FILTER_REJECT;
-
-      out.push(el);
-      return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_SKIP;
     },
   };
 

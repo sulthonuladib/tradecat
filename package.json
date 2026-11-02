@@ -1,6 +1,6 @@
 {
   "name": "tradecat-idr",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "ScriptCat userscripts: IDR orderbook conversion + deposit/withdraw status for gate.com and mexc.fm",
   "type": "module",
@@ -11,7 +11,8 @@
     "test": "bun test && bun run test:dom",
     "test:dom": "bun run test/dom.test.mjs",
     "check": "tsc -p tsconfig.json && tsc -p tsconfig.tools.json",
-    "check:watch": "tsc -p tsconfig.json --watch"
+    "check:watch": "tsc -p tsconfig.json --watch",
+    "live": "bun run scripts/live-check.mjs"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",

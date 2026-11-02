@@ -138,15 +138,30 @@ from being mistaken for a two-row table. Rows with an extra numeric column
 (change %, fee) still map correctly because the tightest column span wins and
 the mapping has to agree across the whole list.
 
-Only the price cell is ever annotated: a `span.tc-idr-price` is appended inside
-it, and the total leaf's text is replaced. When the configured format does not
-fit the cell (MEXC's price column is ~82 px), the badge degrades to compact
-(`1,44 M`) and then to a tight `1,44M` at a smaller size; the full value always
-stays in the `title` tooltip. `idr.fit` turns that behaviour off.
+The IDR price is drawn in an **overlay layer** (`.tc-idr-layer`) anchored to the
+row list, not injected into the exchange's cells. Exchanges re-render cells
+constantly (React replaces text nodes and wipes unknown children; MEXC does it on
+every tick), so anything inside a cell disappears immediately. The reference
+scripts solved this by absolutely positioning a column of gold numbers; this
+does the same, but computes the position from each row's live geometry
+(`getBoundingClientRect`) instead of hardcoded pixel margins, so it adapts to any
+panel width, row height or scroll position.
 
-It re-applies on a 700 ms heartbeat plus a throttled `MutationObserver`, so live
-price flashes, SPA re-renders and pair switches keep working. Cheap locators
-(MEXC selectors) refresh every tick; structural scans are throttled to ~1.2 s.
+Numbers are chosen for readability: full IDR if it fits beside the price,
+otherwise compact at the **same font size** (`1,41 M`), then a tight compact.
+The full IDR value always stays in the `title` tooltip, and `idr.fit` turns the
+degradation off. Very narrow price cells fall back to the empty left side of the
+right-aligned amount column.
+
+The Total (USDT) leaf is rewritten in place, since the exchange owns that text
+and the engine re-applies it right after a re-render.
+
+It re-applies on a 500 ms heartbeat plus a document-level `MutationObserver`
+(60 ms debounce), and repositions the overlay on scroll and resize. Cheap
+locators (MEXC selectors) refresh every tick; structural scans are throttled
+(gate ~0.5 s, generic ~0.8 s). Rows are re-mapped positionally each tick, so a
+row caught mid-animation or recycled by a virtual list neither loses its badge
+nor keeps a stale one.
 
 Sub-cent prices written in collapsed notation (`0.0{4}1234`, `0.0₄123`) are
 expanded before conversion, which gate uses for coins like SHIB.
@@ -204,7 +219,15 @@ bun run watch      # rebuild on change
 bun test           # unit tests (parsing / formatting)
 bun run test:dom   # headless Chromium end-to-end tests against fixtures
 bun run check      # tsc: src project + tooling project, both strict
+bun run live https://www.gate.com/trade/BTC_USDT   # real page, real DOM
+bun run live https://www.mexc.fm/exchange/BTC_USDT --shot /tmp/mexc.png
 ```
+
+`bun run live` launches headless Chromium (same CDP protocol Puppeteer uses, no
+dependency), opens the page with a normal browser UA, injects `dist/`, and prints
+rows / badges / covered / stale / unconverted / alignment. Gate's edge blocks
+plain HTTP clients but not a real browser, so this is the reliable way to check a
+layout change against the real exchange.
 
 Two TypeScript projects: `tsconfig.json` compiles the userscript sources against
 `DOM` only (no Bun/Node globals can leak in), `tsconfig.tools.json` compiles
@@ -229,10 +252,13 @@ src/
   lib/coininfo.ts         deposit/withdraw per coin + chain
   lib/panel.ts            shadow-DOM panel (chains + Deposit/Withdraw buttons)
   lib/site.ts             site detection, pair parsing, deposit/withdraw URLs
+scripts/
+  bump.ts                 version bump across metadata + package.json
+  live-check.mjs          real-page check over CDP (bun run live)
 test/
   format.test.ts          bun:test unit tests
   dom.test.mjs            serves fixtures, runs the built script in Chromium
-  fixtures/*.html         gate-like, mexc-like, tiny-price, adversarial, GM-stub pages
+  fixtures/*.html         gate/mexc live markup, tiny-price, adversarial, GM-stub pages
 ```
 
 The DOM tests are the useful part: they assert exact converted strings for

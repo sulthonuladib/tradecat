@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.0
+// @version      0.3.1
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       tradecat
 // @license      MIT
@@ -380,6 +380,14 @@ coin:
     }
     return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
   }
+  function ownText(el) {
+    let out = "";
+    el.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE)
+        out += node.textContent ?? "";
+    });
+    return out.replace(/\s+/g, " ").trim();
+  }
   function walkLeaves(root, out, maxLeaves = 1200, maxNodes = 20000) {
     let visited = 0;
     const filter = {
@@ -392,17 +400,12 @@ coin:
           return NodeFilter.FILTER_REJECT;
         if (el.classList.contains(INJECTED))
           return NodeFilter.FILTER_REJECT;
-        const kids = el.children;
-        for (let index = 0;index < kids.length; index += 1) {
-          const kid = kids[index];
-          if (kid && !kid.classList.contains(INJECTED))
-            return NodeFilter.FILTER_SKIP;
+        const text = ownText(el);
+        if (text && text.length <= 32) {
+          out.push(el);
+          return out.length >= maxLeaves ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
         }
-        const text = cleanText(el);
-        if (!text || text.length > 32)
-          return NodeFilter.FILTER_REJECT;
-        out.push(el);
-        return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_SKIP;
       }
     };
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, filter);
@@ -600,9 +603,29 @@ coin:
       amount: triple.amount,
       total: triple.total,
       priceCell: cellOf(triple.price.el, row),
+      amountCell: cellOf(triple.amount.el, row),
       totalCell: cellOf(triple.total.el, row),
       key: triple.key
     };
+  }
+  function refreshRow(row) {
+    if (!row.row.isConnected)
+      return null;
+    const leaves = leavesOf(row.row, MAX_ROW_NUMBERS + 2);
+    const [priceIndex = 0, amountIndex = 1, totalIndex = 2] = row.key.split(",").map(Number);
+    const price = leaves[priceIndex];
+    const amount = leaves[amountIndex];
+    const total = leaves[totalIndex];
+    if (price && amount && total) {
+      return toOrderRow(row.row, {
+        price,
+        amount,
+        total,
+        key: row.key,
+        span: totalIndex - priceIndex
+      });
+    }
+    return rowTriple(row.row);
   }
   function rowTriple(row) {
     const leaves = leavesOf(row, MAX_ROW_NUMBERS + 2);
@@ -658,32 +681,50 @@ coin:
       const kids = Array.from(parent.children).filter((kid) => kid instanceof HTMLElement && !kid.classList.contains(INJECTED));
       if (kids.length < minRows || kids.length > 96)
         continue;
-      const candidates = [];
-      let rowLikeKids = 0;
+      const numbered = [];
+      let tooMany = false;
       for (const kid of kids) {
         const own = numbers.filter((leaf) => kid.contains(leaf.el));
         if (own.length === 0)
           continue;
         if (own.length > MAX_ROW_NUMBERS) {
-          rowLikeKids = 0;
+          tooMany = true;
           break;
         }
         if (own.length < 2)
           continue;
-        const triple = findTriple(own);
-        if (!triple)
-          continue;
-        rowLikeKids += 1;
-        candidates.push(toOrderRow(kid, triple));
+        numbered.push({ kid, own, triple: findTriple(own) });
       }
-      if (rowLikeKids < minRows)
+      if (tooMany)
         continue;
-      if (rowLikeKids / kids.length < 0.6)
+      if (numbered.length / kids.length < 0.6)
+        continue;
+      const candidates = numbered.filter((entry) => entry.triple !== null).map((entry) => toOrderRow(entry.kid, entry.triple));
+      if (candidates.length < minRows)
         continue;
       const key = dominantKey(candidates);
       if (!key)
         continue;
-      const rows = candidates.filter((row) => row.key === key);
+      const [priceIndex, amountIndex, totalIndex] = key.split(",").map(Number);
+      const rows = [];
+      for (const entry of numbered) {
+        if (entry.triple && entry.triple.key === key) {
+          rows.push(toOrderRow(entry.kid, entry.triple));
+          continue;
+        }
+        const price = entry.own[priceIndex ?? 0];
+        const amount = entry.own[amountIndex ?? 1];
+        const total = entry.own[totalIndex ?? 2];
+        if (!price || !amount || !total)
+          continue;
+        rows.push(toOrderRow(entry.kid, {
+          price,
+          amount,
+          total,
+          key,
+          span: (totalIndex ?? 2) - (priceIndex ?? 0)
+        }));
+      }
       if (rows.length < minRows)
         continue;
       groups.push({ parent, rows });
@@ -755,7 +796,7 @@ coin:
   }
   var gateAdapter = {
     id: "gate",
-    cacheMs: 1200,
+    cacheMs: 500,
     locate(doc) {
       let single = null;
       for (const selector of SCOPES) {
@@ -784,7 +825,7 @@ coin:
   // src/lib/exchanges/generic.ts
   var genericAdapter = {
     id: "generic",
-    cacheMs: 1500,
+    cacheMs: 800,
     locate(doc) {
       const scope = doc.body;
       if (!scope)
@@ -876,37 +917,28 @@ coin:
     const candidate = String(value).trim();
     return COLOR_RE.test(candidate) ? candidate : "";
   }
-  var PRICE_IDR_BASE_STYLE = [
+  var LAYER = "tc-idr-layer";
+  var BADGE_BASE_STYLE = [
+    "position:absolute",
     "font-weight:400",
-    "line-height:1",
     "white-space:nowrap",
     "letter-spacing:0",
     "display:inline-block",
-    "vertical-align:baseline",
     "pointer-events:none",
     "user-select:none",
-    "font-variant-numeric:tabular-nums"
+    "font-variant-numeric:tabular-nums",
+    "z-index:1"
   ];
-  function priceBadgeStyle(config, fontSizeEm, gapPx) {
-    const color = sanitizeColor(config.priceColor);
-    return [
-      ...PRICE_IDR_BASE_STYLE,
-      `margin-left:${gapPx}px`,
-      `font-size:${fontSizeEm}em`,
-      `color:${color || "inherit"}`,
-      `opacity:${color ? "1" : "0.72"}`
-    ].join(";");
-  }
-  function ensureBadge(cell) {
-    let badge = cell.querySelector(":scope > ." + PRICE_IDR);
-    if (!badge) {
-      badge = document.createElement("span");
-      badge.className = `${INJECTED} ${PRICE_IDR}`;
-      badge.setAttribute("aria-hidden", "true");
-      cell.appendChild(badge);
-    }
-    return badge;
-  }
+  var LAYER_STYLE = [
+    "position:absolute",
+    "left:0",
+    "top:0",
+    "width:0",
+    "height:0",
+    "overflow:visible",
+    "pointer-events:none",
+    "z-index:1"
+  ].join(";");
   var metricsCache = new WeakMap;
   var widthEpoch = 0;
   if (typeof window !== "undefined") {
@@ -950,39 +982,138 @@ coin:
       fontPx,
       weight: style.fontWeight || "400",
       family: style.fontFamily || "sans-serif",
+      position: style.position || "static",
       epoch: widthEpoch
     };
     metricsCache.set(cell, metrics);
     return metrics;
   }
-  function choosePriceText(full, compact, priceText, metrics, fit) {
-    const regular = { text: full, fontEm: 0.82, gapPx: 6 };
-    if (!fit || !metrics)
-      return regular;
-    const font = (em) => `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
-    const base = measureText(priceText, font(1));
+  function fontFor(metrics, em) {
+    return `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
+  }
+  function choosePriceText(full, compact, priceText, priceMetrics, amountText, amountMetrics, fit) {
     const tight = compact.replace(/\s+/g, "");
-    const fits = (text, em, gap) => base + gap + measureText(text, font(em)) <= metrics.contentWidth + 0.5;
-    if (fits(regular.text, regular.fontEm, regular.gapPx))
-      return regular;
-    const compactChoice = { text: compact, fontEm: 0.82, gapPx: 6 };
-    if (fits(compactChoice.text, compactChoice.fontEm, compactChoice.gapPx))
-      return compactChoice;
-    const tightChoice = { text: tight, fontEm: 0.68, gapPx: 4 };
-    if (fits(tightChoice.text, tightChoice.fontEm, tightChoice.gapPx))
-      return tightChoice;
-    return { text: tight, fontEm: 0.62, gapPx: 2 };
+    if (!fit || !priceMetrics)
+      return { text: full, fontEm: 0.85, placement: "price" };
+    const tiers = [
+      { text: full, em: 0.85 },
+      { text: compact, em: 1 },
+      { text: tight, em: 1 },
+      { text: tight, em: 0.85 }
+    ];
+    const fitsIn = (metrics, leadingText, tier) => {
+      const free = metrics.contentWidth - measureText(leadingText, fontFor(metrics, 1)) - 2;
+      return free > 0 && measureText(tier.text, fontFor(metrics, tier.em)) <= free;
+    };
+    for (const tier of tiers) {
+      if (fitsIn(priceMetrics, priceText, tier)) {
+        return { text: tier.text, fontEm: tier.em, placement: "price" };
+      }
+    }
+    if (amountMetrics && amountText) {
+      for (const tier of tiers) {
+        if (fitsIn(amountMetrics, amountText, tier)) {
+          return { text: tier.text, fontEm: tier.em, placement: "amount" };
+        }
+      }
+    }
+    const last = tiers[tiers.length - 1];
+    return { text: last?.text ?? tight, fontEm: last?.em ?? 0.85, placement: "price" };
   }
   function chooseVolumeText(full, compact, metrics, fit) {
     if (!fit || !metrics)
       return full;
-    const font = `${metrics.weight} ${metrics.fontPx}px ${metrics.family}`;
-    return measureText(full, font) <= metrics.contentWidth + 0.5 ? full : compact;
+    const font = fontFor(metrics, 1);
+    const available = metrics.contentWidth - 2;
+    if (measureText(full, font) <= available)
+      return full;
+    if (measureText(compact, font) <= available)
+      return compact;
+    return compact.replace(/\s+/g, "");
+  }
+  var badgeState = new Map;
+  var layers = new Set;
+  var hostPositions = new WeakSet;
+  function layerFor(host) {
+    const existing = host.querySelector(":scope > ." + LAYER);
+    if (existing)
+      return existing;
+    const layer = document.createElement("div");
+    layer.className = `${INJECTED} ${LAYER}`;
+    layer.setAttribute("aria-hidden", "true");
+    layer.setAttribute("style", LAYER_STYLE);
+    host.appendChild(layer);
+    layers.add(layer);
+    if (!hostPositions.has(host)) {
+      hostPositions.add(host);
+      try {
+        if (getComputedStyle(host).position === "static")
+          host.style.position = "relative";
+      } catch {}
+    }
+    return layer;
+  }
+  function badgeFor(row, host) {
+    const existing = badgeState.get(row);
+    if (existing && existing.host === host && existing.badge.isConnected)
+      return existing;
+    if (existing)
+      existing.badge.remove();
+    const layer = layerFor(host);
+    const badge = document.createElement("span");
+    badge.className = `${INJECTED} ${PRICE_IDR}`;
+    badge.setAttribute("aria-hidden", "true");
+    layer.appendChild(badge);
+    const entry = { badge, host, layer };
+    badgeState.set(row, entry);
+    return entry;
+  }
+  function cleanupBadges(keep) {
+    for (const [row, entry] of badgeState) {
+      if (keep.has(row) && row.isConnected)
+        continue;
+      entry.badge.remove();
+      badgeState.delete(row);
+    }
+    for (const layer of layers) {
+      if (!layer.isConnected) {
+        layers.delete(layer);
+        continue;
+      }
+      if (layer.childElementCount === 0) {
+        layer.remove();
+        layers.delete(layer);
+      }
+    }
+  }
+  function clearOverlays() {
+    for (const entry of badgeState.values())
+      entry.badge.remove();
+    badgeState.clear();
+    for (const layer of layers)
+      layer.remove();
+    layers.clear();
+  }
+  function hostFor(row, rowElements) {
+    let node = row.parentElement;
+    for (let depth = 0;node && depth < 8; depth += 1, node = node.parentElement) {
+      let found = 0;
+      for (const el of rowElements) {
+        if (found >= 2)
+          break;
+        if (node.contains(el))
+          found += 1;
+      }
+      if (found >= 2)
+        return node;
+    }
+    return row.parentElement ?? document.body;
   }
   function planRows(rows, rate, config) {
     const prices = [];
     const volumes = [];
     const volumeColor = sanitizeColor(config.volumeColor);
+    const rowElements = rows.map((row) => row.row);
     for (const row of rows) {
       const priceText = siteText(row.price.el);
       const price = parseNumber(priceText);
@@ -990,13 +1121,21 @@ coin:
         const idr = price * rate;
         const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
         const compact = formatIdr(idr, { prefix: config.prefix, mode: "compact" });
-        const metrics = metricsFor(row.priceCell);
-        const choice = choosePriceText(full, compact, priceText, metrics, config.fit);
+        const priceMetrics = metricsFor(row.priceCell);
+        const amountText = row.amount ? siteText(row.amount.el) : null;
+        const amountMetrics = row.amountCell ? metricsFor(row.amountCell) : null;
+        const choice = choosePriceText(full, compact, priceText, priceMetrics, amountText, amountMetrics, config.fit);
+        const cell = choice.placement === "amount" && row.amountCell ? row.amountCell : row.priceCell;
+        const hostMetrics = choice.placement === "amount" ? amountMetrics : priceMetrics;
         prices.push({
-          cell: row.priceCell,
+          rowEl: row.row,
+          host: hostFor(row.row, rowElements),
+          cell,
           text: choice.text,
           full,
-          style: priceBadgeStyle(config, choice.fontEm, choice.gapPx)
+          fontEm: choice.fontEm,
+          placement: choice.placement,
+          textWidth: hostMetrics ? measureText(choice.text, fontFor(hostMetrics, choice.fontEm)) : choice.text.length * 7
         });
       }
       if (config.convertTotal) {
@@ -1018,22 +1157,56 @@ coin:
     }
     return { prices, volumes };
   }
-  function applyPlan(plan) {
-    for (const write of plan.prices) {
-      const badge = ensureBadge(write.cell);
-      if (badge.dataset["tcStyle"] !== write.style) {
-        badge.dataset["tcStyle"] = write.style;
-        badge.setAttribute("style", write.style);
-      }
-      if (badge.textContent !== write.text)
-        badge.textContent = write.text;
-      if (badge.getAttribute("title") !== write.full)
-        badge.setAttribute("title", write.full);
+  function applyPrices(writes, config) {
+    const keep = new Set;
+    const color = sanitizeColor(config.priceColor);
+    const placed = [];
+    for (const write of writes) {
+      const entry = badgeFor(write.rowEl, write.host);
+      keep.add(write.rowEl);
+      placed.push({ write, entry });
     }
-    for (const write of plan.volumes) {
-      if (write.color) {
-        if (write.target.style.color !== write.color)
-          write.target.style.color = write.color;
+    cleanupBadges(keep);
+    const positions = placed.map(({ write, entry }) => {
+      const cellRect = write.cell.getBoundingClientRect();
+      const layerRect = entry.layer.getBoundingClientRect();
+      return { write, entry, cellRect, layerRect };
+    });
+    for (const { write, entry, cellRect, layerRect } of positions) {
+      if (cellRect.width <= 0 || cellRect.height <= 0) {
+        entry.badge.style.display = "none";
+        continue;
+      }
+      const width = write.textWidth + 2;
+      const left = write.placement === "price" ? cellRect.left - layerRect.left + cellRect.width - width - 2 : cellRect.left - layerRect.left + 2;
+      const top = cellRect.top - layerRect.top;
+      const height = cellRect.height;
+      const style = [
+        ...BADGE_BASE_STYLE,
+        `left:${Math.round(left)}px`,
+        `top:${Math.round(top)}px`,
+        `height:${Math.round(height)}px`,
+        `line-height:${Math.round(height)}px`,
+        `font-size:${write.fontEm}em`,
+        `color:${color || "inherit"}`,
+        `opacity:${color ? "1" : "0.75"}`
+      ].join(";");
+      if (entry.badge.dataset["tcStyle"] !== style) {
+        entry.badge.dataset["tcStyle"] = style;
+        entry.badge.setAttribute("style", `${style};display:inline-block`);
+      } else if (entry.badge.style.display === "none") {
+        entry.badge.style.display = "inline-block";
+      }
+      if (entry.badge.textContent !== write.text)
+        entry.badge.textContent = write.text;
+      if (entry.badge.getAttribute("title") !== write.full)
+        entry.badge.setAttribute("title", write.full);
+    }
+  }
+  function applyVolumes(writes) {
+    for (const write of writes) {
+      if (write.color && write.target.style.color !== write.color) {
+        write.target.style.color = write.color;
       }
       if (cleanText(write.target) === write.text)
         continue;
@@ -1041,17 +1214,6 @@ coin:
       write.target.dataset["tcOrig"] = write.original;
       write.target.textContent = write.text;
     }
-  }
-  function rootFor(rows) {
-    const first = rows[0];
-    if (!first)
-      return null;
-    let node = first.row.parentElement;
-    for (let depth = 0;node && depth < 12; depth += 1, node = node.parentElement) {
-      if (rows.every((row) => node?.contains(row.row)))
-        return node;
-    }
-    return first.row.parentElement;
   }
   function describeOrderbook(site) {
     const adapter = adapterFor(site);
@@ -1073,18 +1235,17 @@ coin:
     let debounce = null;
     let heartbeat = null;
     let stopped = false;
-    const observe = (root) => {
-      observer?.disconnect();
-      if (!root)
-        return;
-      observer = new MutationObserver(() => schedule(60));
-      observer.observe(root, { childList: true, subtree: true, characterData: true });
-    };
     const locate = () => {
-      const found = adapter.locate(document);
-      rows = found && found.length > 0 ? found : null;
+      const found = adapter.locate(document) ?? [];
+      const merged = new Map;
+      for (const row of rows ?? []) {
+        if (row.row.isConnected)
+          merged.set(row.row, row);
+      }
+      for (const row of found)
+        merged.set(row.row, row);
+      rows = merged.size > 0 ? [...merged.values()] : null;
       locatedAt = Date.now();
-      observe(rows ? rootFor(rows) : null);
     };
     const tick = () => {
       if (stopped)
@@ -1094,8 +1255,18 @@ coin:
         locate();
       if (!rows || rows.length === 0)
         return;
+      const current = [];
+      for (const row of rows) {
+        const fresh = refreshRow(row);
+        if (fresh)
+          current.push(fresh);
+      }
+      if (current.length === 0)
+        return;
       const config = options.getConfig();
-      applyPlan(planRows(rows, options.getRate(), config));
+      const plan = planRows(current, options.getRate(), config);
+      applyVolumes(plan.volumes);
+      applyPrices(plan.prices, config);
     };
     const schedule = (delay = 120) => {
       if (stopped || debounce !== null)
@@ -1106,9 +1277,13 @@ coin:
       }, delay);
     };
     const start = () => {
+      observer = new MutationObserver(() => schedule(60));
+      observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      document.addEventListener("scroll", () => schedule(0), { capture: true, passive: true });
+      window.addEventListener("resize", () => schedule(0), { passive: true });
       locate();
       tick();
-      heartbeat = setInterval(tick, 700);
+      heartbeat = setInterval(tick, 500);
     };
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", start, { once: true });
@@ -1128,6 +1303,7 @@ coin:
         if (heartbeat)
           clearInterval(heartbeat);
         observer?.disconnect();
+        clearOverlays();
       }
     };
   }

@@ -3,6 +3,31 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.1
+
+- **Reference-style overlay rendering.** The IDR price is no longer injected
+  inside the exchange's price cell - React/gate/MEXC replace those cells on every
+  tick and wipe unknown children, which made the badge flicker or disappear. It
+  now lives in a `.tc-idr-layer` anchored to the row list, positioned from each
+  row's live geometry (no hardcoded margins), and is repositioned on scroll and
+  resize. Verified on live gate and MEXC: 20/20 and 18/18 rows covered, 0 stale,
+  0 unconverted totals, ≤1 px vertical drift.
+- **Readable numbers instead of tiny ones.** When the full IDR value does not fit
+  beside the price, the badge uses compact text at the same font size (`1,41 M`)
+  and only shrinks as a last resort. Very narrow price cells fall back to the
+  free left side of the right-aligned amount column. Full value stays in the
+  `title` tooltip.
+- **Re-render hardening.** Rows are re-mapped from the live DOM each tick
+  (`refreshRow`), known rows stay sticky while connected, rows whose numbers are
+  mid-animation are mapped positionally, and a document-level mutation observer
+  (60 ms debounce) replaces the old container observer that went silent when the
+  exchange swapped the list container.
+- `bun run live <url>` (`scripts/live-check.mjs`): headless Chromium over CDP,
+  injects `dist/`, reports rows/badges/stale/unconverted/alignment and optionally
+  saves a screenshot. Used against the real gate and MEXC pages.
+- Tests: 45 unit + 59 DOM checks, including overlay alignment probes in the
+  live-markup fixtures.
+
 ## 0.3.0
 
 - **Orderbook detection is now per exchange** (`src/lib/exchanges/`): gate, mexc

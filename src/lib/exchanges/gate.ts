@@ -26,7 +26,7 @@ function rowsIn(scope: HTMLElement, minRows: number): OrderRow[] {
 
 export const gateAdapter: ExchangeAdapter = {
   id: 'gate',
-  cacheMs: 1200,
+  cacheMs: 500,
   locate(doc) {
     let single: OrderRow[] | null = null;
 

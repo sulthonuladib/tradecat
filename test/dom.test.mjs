@@ -148,6 +148,7 @@ async function main() {
     expectContains(html, '>78,036.27<', 'market trades price untouched');
     expectContains(html, '>12:34:56<', 'market trades time untouched');
     expectContains(html, 'value="77700"', 'trade form inputs untouched');
+    expectMatch(html, /data-tc-align="4\/4:[01]"/, 'overlay badge is aligned with every row');
   }
 
   console.log('gate.com live markup (hashed classes, depth bars, 4 columns, tiny brace price)');
@@ -161,6 +162,7 @@ async function main() {
     expectContains(html, '>228.290<', 'tiny-price total 12.34 -> IDR');
     expectContains(html, '>0.12%<', 'extra change column untouched');
     expectContains(html, '>77,650.10<', 'market trades price untouched');
+    expectMatch(html, /data-tc-align="6\/6:[01]"/, 'overlay badge is aligned with every row');
   }
 
   console.log('tiny prices (0.000000123) and a 4-column row');

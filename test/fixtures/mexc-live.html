@@ -112,5 +112,27 @@
     bid.querySelector('.index-module-scss-module__hVXrWq__amount span').textContent = '385.00';
   }, 1500);
 </script>
+
+<script>
+  // Regression probe: the IDR overlay must line up with every row.
+  setTimeout(function () {
+    var rows = [].slice.call(document.querySelectorAll('.item'));
+    var badges = [].slice.call(document.querySelectorAll('[class*="idr-price"]'));
+    var covered = 0, maxDy = 0;
+    rows.forEach(function (row) {
+      var rr = row.getBoundingClientRect();
+      var cy = rr.top + rr.height / 2;
+      var best = 1e9, hit = false;
+      badges.forEach(function (badge) {
+        var br = badge.getBoundingClientRect();
+        if (br.width <= 0 || br.left < rr.left - 4 || br.left > rr.right + 4) return;
+        var dy = Math.abs(br.top + br.height / 2 - cy);
+        if (dy <= rr.height && dy < best) { best = dy; hit = true; }
+      });
+      if (hit) { covered += 1; maxDy = Math.max(maxDy, Math.round(best)); }
+    });
+    document.documentElement.setAttribute('data-tc-align', covered + '/' + rows.length + ':' + maxDy);
+  }, 3000);
+</script>
 </body>
 </html>

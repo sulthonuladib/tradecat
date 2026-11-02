@@ -2,21 +2,26 @@
  * Orderbook converter engine.
  *
  * Locating rows is delegated to a per-exchange adapter (see `./exchanges`).
- * This module owns everything else:
+ * This module owns rendering, rate updates and re-render survival.
  *
- *   - re-locating when the exchange re-renders (SPA route changes, payload
- *     swaps, virtualised scrolling) and throttling the expensive scans,
- *   - appending the IDR price badge next to every price,
- *   - replacing the Total (USDT) cell with its IDR value,
- *   - keeping all of that stable under React-style re-renders.
+ * The IDR price is drawn in an **overlay layer** (`.tc-idr-layer`) anchored to
+ * the row list, not injected into the exchange's cells. Exchanges re-render
+ * cells constantly (React replaces text nodes and wipes unknown children, MEXC
+ * does it on every tick), so anything inside a cell disappears immediately. The
+ * reference scripts solved this by absolutely positioning a column of gold
+ * numbers; we do the same, but derive the position from the live row geometry
+ * instead of hardcoded pixel margins, so it adapts to any panel width, row
+ * height or exchange layout.
  *
- * Layout safety: a badge is never wider than the price cell. When the configured
- * format does not fit, the badge degrades to compact (`1,44 M`) and then to a
- * tight compact (`1,44M`, smaller font). A `title` always carries the full IDR
- * value, and the volume column does the same (compact when full would clip).
+ * The Total (USDT) cell is still rewritten in place: it is a value the exchange
+ * itself re-renders, and the engine re-applies it right after.
+ *
+ * Number choice: full IDR if it fits beside the price, otherwise compact at the
+ * same font size (`1,41 M`), then a tight compact. The full IDR value always
+ * stays in the `title` tooltip.
  */
 import { cleanText, INJECTED, markRendered, PRICE_IDR, siteText } from './dom';
-import type { OrderRow } from './detect';
+import { refreshRow, type OrderRow } from './detect';
 import { adapterFor, type ExchangeAdapter } from './exchanges';
 import { formatIdr, parseNumber, type IdrMode } from './format';
 import type { SiteId } from './site';
@@ -49,60 +54,50 @@ function sanitizeColor(value: string | null | undefined): string {
   return COLOR_RE.test(candidate) ? candidate : '';
 }
 
-const PRICE_IDR_BASE_STYLE = [
+const LAYER = 'tc-idr-layer';
+type Placement = 'price' | 'amount';
+
+const BADGE_BASE_STYLE = [
+  'position:absolute',
   'font-weight:400',
-  'line-height:1',
   'white-space:nowrap',
   'letter-spacing:0',
   'display:inline-block',
-  'vertical-align:baseline',
   'pointer-events:none',
   'user-select:none',
   'font-variant-numeric:tabular-nums',
+  'z-index:1',
 ];
 
-function priceBadgeStyle(config: OrderbookConfig, fontSizeEm: number, gapPx: number): string {
-  const color = sanitizeColor(config.priceColor);
-  return [
-    ...PRICE_IDR_BASE_STYLE,
-    `margin-left:${gapPx}px`,
-    `font-size:${fontSizeEm}em`,
-    `color:${color || 'inherit'}`,
-    `opacity:${color ? '1' : '0.72'}`,
-  ].join(';');
-}
-
-function ensureBadge(cell: HTMLElement): HTMLElement {
-  let badge = cell.querySelector<HTMLElement>(':scope > .' + PRICE_IDR);
-  if (!badge) {
-    badge = document.createElement('span');
-    badge.className = `${INJECTED} ${PRICE_IDR}`;
-    badge.setAttribute('aria-hidden', 'true');
-    cell.appendChild(badge);
-  }
-  return badge;
-}
+const LAYER_STYLE = [
+  'position:absolute',
+  'left:0',
+  'top:0',
+  'width:0',
+  'height:0',
+  'overflow:visible',
+  'pointer-events:none',
+  'z-index:1',
+].join(';');
 
 // --- text measurement ----------------------------------------------------
 //
-// Deciding whether the full IDR number fits must not force a layout on every
-// price tick, so widths come from a canvas plus one cached `clientWidth` read
-// per cell. The width is pinned for the current layout and only re-read after a
-// window resize, so the badge can never grow its own budget.
+// Deciding whether a number fits must not force a layout on every price tick,
+// so widths come from a canvas plus one cached `clientWidth` read per cell.
 
 interface CellMetrics {
   contentWidth: number;
   fontPx: number;
   weight: string;
   family: string;
+  position: string;
   epoch: number;
 }
 
 const metricsCache = new WeakMap<HTMLElement, CellMetrics>();
 
-// A cell's width is captured *before* the badge exists and then kept for the
-// current layout. Re-measuring after insertion would let the badge enlarge its
-// own budget and squeeze the amount columns of a flex row.
+// Cell widths are pinned for the current layout (and re-read after a window
+// resize), so the badge can never grow its own budget and squeeze the amounts.
 let widthEpoch = 0;
 if (typeof window !== 'undefined') {
   window.addEventListener(
@@ -113,6 +108,7 @@ if (typeof window !== 'undefined') {
     { passive: true },
   );
 }
+
 let canvasCtx: CanvasRenderingContext2D | null | undefined;
 
 function measureText(text: string, font: string): number {
@@ -150,64 +146,193 @@ function metricsFor(cell: HTMLElement): CellMetrics | null {
     fontPx,
     weight: style.fontWeight || '400',
     family: style.fontFamily || 'sans-serif',
+    position: style.position || 'static',
     epoch: widthEpoch,
   };
   metricsCache.set(cell, metrics);
   return metrics;
 }
 
+function fontFor(metrics: CellMetrics, em: number): string {
+  return `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
+}
+
 interface TextChoice {
   text: string;
   fontEm: number;
-  gapPx: number;
+  placement: Placement;
 }
 
 /**
- * Full IDR, compact IDR or tight compact - whichever fits the cell. Narrow
- * exchange columns (MEXC's price cell is ~82px) can need the smallest tier.
+ * Full IDR, compact IDR or tight compact - whichever fits beside the price.
+ *
+ * Prices are left-aligned and amounts right-aligned, so the free space sits to
+ * the right of the price (or the left of the amount). Compact stays at 1em:
+ * `1,41 M` is readable where a shrunken `1.403.458.200` is not.
  */
 function choosePriceText(
   full: string,
   compact: string,
   priceText: string,
-  metrics: CellMetrics | null,
+  priceMetrics: CellMetrics | null,
+  amountText: string | null,
+  amountMetrics: CellMetrics | null,
   fit: boolean,
 ): TextChoice {
-  const regular: TextChoice = { text: full, fontEm: 0.82, gapPx: 6 };
-  if (!fit || !metrics) return regular;
-
-  const font = (em: number): string =>
-    `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
-  const base = measureText(priceText, font(1));
   const tight = compact.replace(/\s+/g, '');
-  const fits = (text: string, em: number, gap: number): boolean =>
-    base + gap + measureText(text, font(em)) <= metrics.contentWidth + 0.5;
+  if (!fit || !priceMetrics) return { text: full, fontEm: 0.85, placement: 'price' };
 
-  if (fits(regular.text, regular.fontEm, regular.gapPx)) return regular;
+  const tiers: Array<{ text: string; em: number }> = [
+    { text: full, em: 0.85 },
+    { text: compact, em: 1 },
+    { text: tight, em: 1 },
+    { text: tight, em: 0.85 },
+  ];
 
-  const compactChoice: TextChoice = { text: compact, fontEm: 0.82, gapPx: 6 };
-  if (fits(compactChoice.text, compactChoice.fontEm, compactChoice.gapPx)) return compactChoice;
+  const fitsIn = (metrics: CellMetrics, leadingText: string, tier: { text: string; em: number }): boolean => {
+    const free = metrics.contentWidth - measureText(leadingText, fontFor(metrics, 1)) - 2;
+    return free > 0 && measureText(tier.text, fontFor(metrics, tier.em)) <= free;
+  };
 
-  const tightChoice: TextChoice = { text: tight, fontEm: 0.68, gapPx: 4 };
-  if (fits(tightChoice.text, tightChoice.fontEm, tightChoice.gapPx)) return tightChoice;
+  for (const tier of tiers) {
+    if (fitsIn(priceMetrics, priceText, tier)) {
+      return { text: tier.text, fontEm: tier.em, placement: 'price' };
+    }
+  }
 
-  return { text: tight, fontEm: 0.62, gapPx: 2 };
+  // Very narrow price cell: use the empty left side of the right-aligned amount.
+  if (amountMetrics && amountText) {
+    for (const tier of tiers) {
+      if (fitsIn(amountMetrics, amountText, tier)) {
+        return { text: tier.text, fontEm: tier.em, placement: 'amount' };
+      }
+    }
+  }
+
+  const last = tiers[tiers.length - 1];
+  return { text: last?.text ?? tight, fontEm: last?.em ?? 0.85, placement: 'price' };
 }
 
-/** Should the full IDR volume be replaced by compact text? */
-function chooseVolumeText(full: string, compact: string, metrics: CellMetrics | null, fit: boolean): string {
+/** Full IDR volume, degraded only when it would not fit the total cell. */
+function chooseVolumeText(
+  full: string,
+  compact: string,
+  metrics: CellMetrics | null,
+  fit: boolean,
+): string {
   if (!fit || !metrics) return full;
-  const font = `${metrics.weight} ${metrics.fontPx}px ${metrics.family}`;
-  return measureText(full, font) <= metrics.contentWidth + 0.5 ? full : compact;
+  const font = fontFor(metrics, 1);
+  const available = metrics.contentWidth - 2;
+  if (measureText(full, font) <= available) return full;
+  if (measureText(compact, font) <= available) return compact;
+  return compact.replace(/\s+/g, '');
+}
+
+// --- overlay -------------------------------------------------------------
+
+interface BadgeEntry {
+  badge: HTMLElement;
+  host: HTMLElement;
+  layer: HTMLElement;
+}
+
+const badgeState = new Map<HTMLElement, BadgeEntry>();
+const layers = new Set<HTMLElement>();
+const hostPositions = new WeakSet<HTMLElement>();
+
+function layerFor(host: HTMLElement): HTMLElement {
+  const existing = host.querySelector<HTMLElement>(':scope > .' + LAYER);
+  if (existing) return existing;
+
+  const layer = document.createElement('div');
+  layer.className = `${INJECTED} ${LAYER}`;
+  layer.setAttribute('aria-hidden', 'true');
+  layer.setAttribute('style', LAYER_STYLE);
+  host.appendChild(layer);
+  layers.add(layer);
+
+  if (!hostPositions.has(host)) {
+    hostPositions.add(host);
+    try {
+      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    } catch {
+      /* ignore */
+    }
+  }
+  return layer;
+}
+
+function badgeFor(row: HTMLElement, host: HTMLElement): BadgeEntry {
+  const existing = badgeState.get(row);
+  if (existing && existing.host === host && existing.badge.isConnected) return existing;
+  if (existing) existing.badge.remove();
+
+  const layer = layerFor(host);
+  const badge = document.createElement('span');
+  badge.className = `${INJECTED} ${PRICE_IDR}`;
+  badge.setAttribute('aria-hidden', 'true');
+  layer.appendChild(badge);
+
+  const entry: BadgeEntry = { badge, host, layer };
+  badgeState.set(row, entry);
+  return entry;
+}
+
+function cleanupBadges(keep: Set<HTMLElement>): void {
+  for (const [row, entry] of badgeState) {
+    if (keep.has(row) && row.isConnected) continue;
+    entry.badge.remove();
+    badgeState.delete(row);
+  }
+  for (const layer of layers) {
+    if (!layer.isConnected) {
+      layers.delete(layer);
+      continue;
+    }
+    if (layer.childElementCount === 0) {
+      layer.remove();
+      layers.delete(layer);
+    }
+  }
+}
+
+/** Remove every overlay (e.g. when the script is disabled at runtime). */
+function clearOverlays(): void {
+  for (const entry of badgeState.values()) entry.badge.remove();
+  badgeState.clear();
+  for (const layer of layers) layer.remove();
+  layers.clear();
+}
+
+/**
+ * An anchor for a row: the nearest ancestor that holds at least two rows.
+ * This skips per-row wrappers (MEXC's absolutely positioned `tableRow`) and
+ * lands on the list container whose coordinate space the overlay shares.
+ */
+function hostFor(row: HTMLElement, rowElements: HTMLElement[]): HTMLElement {
+  let node = row.parentElement;
+  for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+    let found = 0;
+    for (const el of rowElements) {
+      if (found >= 2) break;
+      if (node.contains(el)) found += 1;
+    }
+    if (found >= 2) return node;
+  }
+  return row.parentElement ?? document.body;
 }
 
 // --- rendering -----------------------------------------------------------
 
 interface PriceWrite {
+  rowEl: HTMLElement;
+  host: HTMLElement;
   cell: HTMLElement;
   text: string;
   full: string;
-  style: string;
+  fontEm: number;
+  placement: Placement;
+  textWidth: number;
 }
 
 interface VolumeWrite {
@@ -225,6 +350,7 @@ function planRows(
   const prices: PriceWrite[] = [];
   const volumes: VolumeWrite[] = [];
   const volumeColor = sanitizeColor(config.volumeColor);
+  const rowElements = rows.map((row) => row.row);
 
   for (const row of rows) {
     const priceText = siteText(row.price.el);
@@ -234,13 +360,32 @@ function planRows(
       const idr = price * rate;
       const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
       const compact = formatIdr(idr, { prefix: config.prefix, mode: 'compact' });
-      const metrics = metricsFor(row.priceCell);
-      const choice = choosePriceText(full, compact, priceText, metrics, config.fit);
+      const priceMetrics = metricsFor(row.priceCell);
+      const amountText = row.amount ? siteText(row.amount.el) : null;
+      const amountMetrics = row.amountCell ? metricsFor(row.amountCell) : null;
+      const choice = choosePriceText(
+        full,
+        compact,
+        priceText,
+        priceMetrics,
+        amountText,
+        amountMetrics,
+        config.fit,
+      );
+      const cell = choice.placement === 'amount' && row.amountCell ? row.amountCell : row.priceCell;
+      const hostMetrics = choice.placement === 'amount' ? amountMetrics : priceMetrics;
+
       prices.push({
-        cell: row.priceCell,
+        rowEl: row.row,
+        host: hostFor(row.row, rowElements),
+        cell,
         text: choice.text,
         full,
-        style: priceBadgeStyle(config, choice.fontEm, choice.gapPx),
+        fontEm: choice.fontEm,
+        placement: choice.placement,
+        textWidth: hostMetrics
+          ? measureText(choice.text, fontFor(hostMetrics, choice.fontEm))
+          : choice.text.length * 7,
       });
     }
 
@@ -265,20 +410,66 @@ function planRows(
   return { prices, volumes };
 }
 
-function applyPlan(plan: { prices: PriceWrite[]; volumes: VolumeWrite[] }): void {
-  for (const write of plan.prices) {
-    const badge = ensureBadge(write.cell);
-    if (badge.dataset['tcStyle'] !== write.style) {
-      badge.dataset['tcStyle'] = write.style;
-      badge.setAttribute('style', write.style);
-    }
-    if (badge.textContent !== write.text) badge.textContent = write.text;
-    if (badge.getAttribute('title') !== write.full) badge.setAttribute('title', write.full);
-  }
+function applyPrices(writes: PriceWrite[], config: OrderbookConfig): void {
+  const keep = new Set<HTMLElement>();
+  const color = sanitizeColor(config.priceColor);
 
-  for (const write of plan.volumes) {
-    if (write.color) {
-      if (write.target.style.color !== write.color) write.target.style.color = write.color;
+  // Pass 1: make sure every row has a badge in the right layer (no layout reads).
+  const placed: Array<{ write: PriceWrite; entry: BadgeEntry }> = [];
+  for (const write of writes) {
+    const entry = badgeFor(write.rowEl, write.host);
+    keep.add(write.rowEl);
+    placed.push({ write, entry });
+  }
+  cleanupBadges(keep);
+
+  // Pass 2: read geometry...
+  const positions = placed.map(({ write, entry }) => {
+    const cellRect = write.cell.getBoundingClientRect();
+    const layerRect = entry.layer.getBoundingClientRect();
+    return { write, entry, cellRect, layerRect };
+  });
+
+  // Pass 3: write styles/text.
+  for (const { write, entry, cellRect, layerRect } of positions) {
+    if (cellRect.width <= 0 || cellRect.height <= 0) {
+      entry.badge.style.display = 'none';
+      continue;
+    }
+
+    const width = write.textWidth + 2;
+    const left =
+      write.placement === 'price'
+        ? cellRect.left - layerRect.left + cellRect.width - width - 2
+        : cellRect.left - layerRect.left + 2;
+    const top = cellRect.top - layerRect.top;
+    const height = cellRect.height;
+    const style = [
+      ...BADGE_BASE_STYLE,
+      `left:${Math.round(left)}px`,
+      `top:${Math.round(top)}px`,
+      `height:${Math.round(height)}px`,
+      `line-height:${Math.round(height)}px`,
+      `font-size:${write.fontEm}em`,
+      `color:${color || 'inherit'}`,
+      `opacity:${color ? '1' : '0.75'}`,
+    ].join(';');
+
+    if (entry.badge.dataset['tcStyle'] !== style) {
+      entry.badge.dataset['tcStyle'] = style;
+      entry.badge.setAttribute('style', `${style};display:inline-block`);
+    } else if (entry.badge.style.display === 'none') {
+      entry.badge.style.display = 'inline-block';
+    }
+    if (entry.badge.textContent !== write.text) entry.badge.textContent = write.text;
+    if (entry.badge.getAttribute('title') !== write.full) entry.badge.setAttribute('title', write.full);
+  }
+}
+
+function applyVolumes(writes: VolumeWrite[]): void {
+  for (const write of writes) {
+    if (write.color && write.target.style.color !== write.color) {
+      write.target.style.color = write.color;
     }
     if (cleanText(write.target) === write.text) continue;
     markRendered(write.target, write.text);
@@ -288,17 +479,6 @@ function applyPlan(plan: { prices: PriceWrite[]; volumes: VolumeWrite[] }): void
 }
 
 // --- lifecycle -----------------------------------------------------------
-
-/** Element that covers all rows, used as the mutation-observer root. */
-function rootFor(rows: OrderRow[]): HTMLElement | null {
-  const first = rows[0];
-  if (!first) return null;
-  let node: HTMLElement | null = first.row.parentElement;
-  for (let depth = 0; node && depth < 12; depth += 1, node = node.parentElement) {
-    if (rows.every((row) => node?.contains(row.row))) return node;
-  }
-  return first.row.parentElement;
-}
 
 /** Debug helper: what the engine currently sees. */
 export function describeOrderbook(site?: SiteId): {
@@ -333,18 +513,20 @@ export function startOrderbook(options: {
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
 
-  const observe = (root: HTMLElement | null): void => {
-    observer?.disconnect();
-    if (!root) return;
-    observer = new MutationObserver(() => schedule(60));
-    observer.observe(root, { childList: true, subtree: true, characterData: true });
-  };
-
   const locate = (): void => {
-    const found = adapter.locate(document);
-    rows = found && found.length > 0 ? found : null;
+    const found = adapter.locate(document) ?? [];
+
+    // Keep rows we already mapped while their elements are still in the DOM.
+    // Exchanges re-render text in place, and a row that is momentarily
+    // mid-animation must not lose its badge (or keep a stale one).
+    const merged = new Map<HTMLElement, OrderRow>();
+    for (const row of rows ?? []) {
+      if (row.row.isConnected) merged.set(row.row, row);
+    }
+    for (const row of found) merged.set(row.row, row);
+
+    rows = merged.size > 0 ? [...merged.values()] : null;
     locatedAt = Date.now();
-    observe(rows ? rootFor(rows) : null);
   };
 
   const tick = (): void => {
@@ -359,8 +541,19 @@ export function startOrderbook(options: {
     if (stale) locate();
     if (!rows || rows.length === 0) return;
 
+    // Cells can be replaced inside a row between ticks; re-map them from the
+    // live DOM so we never write into a detached cell.
+    const current: OrderRow[] = [];
+    for (const row of rows) {
+      const fresh = refreshRow(row);
+      if (fresh) current.push(fresh);
+    }
+    if (current.length === 0) return;
+
     const config = options.getConfig();
-    applyPlan(planRows(rows, options.getRate(), config));
+    const plan = planRows(current, options.getRate(), config);
+    applyVolumes(plan.volumes);
+    applyPrices(plan.prices, config);
   };
 
   const schedule = (delay = 120): void => {
@@ -372,9 +565,19 @@ export function startOrderbook(options: {
   };
 
   const start = (): void => {
+    // Watch the whole document: the exchange replaces cells *and* list
+    // containers, so an observer bound to the old row container goes silent.
+    observer = new MutationObserver(() => schedule(60));
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
+    // Overlay badges are positioned from live geometry, so keep them in sync
+    // when the panel is scrolled or resized.
+    document.addEventListener('scroll', () => schedule(0), { capture: true, passive: true });
+    window.addEventListener('resize', () => schedule(0), { passive: true });
+
     locate();
     tick();
-    heartbeat = setInterval(tick, 700);
+    heartbeat = setInterval(tick, 500);
   };
 
   if (document.readyState === 'loading') {
@@ -394,6 +597,7 @@ export function startOrderbook(options: {
       if (debounce) clearTimeout(debounce);
       if (heartbeat) clearInterval(heartbeat);
       observer?.disconnect();
+      clearOverlays();
     },
   };
 }
