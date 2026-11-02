@@ -1,6 +1,10 @@
 // ==UserScript==
 // @name         TradeCat · USDT/IDR Rate Updater
-// @namespace    https://github.com/tradecat/tradecat-idr
+// @namespace    https://github.com/sulthonuladib/tradecat
+// @homepageURL  https://github.com/sulthonuladib/tradecat
+// @supportURL   https://github.com/sulthonuladib/tradecat/issues
+// @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js
+// @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js
 // @version      0.1.0
 // @description  Periodically refresh the shared USDT → IDR rate (Indodax, then CoinGecko) that the TradeCat orderbook script reads from storage.
 // @author       tradecat

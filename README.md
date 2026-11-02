@@ -2,6 +2,8 @@
 
 ScriptCat userscripts that make USDT orderbooks readable in rupiah.
 
+**Install: [INSTALL.md](INSTALL.md)**
+
 | Feature | Where |
 | --- | --- |
 | IDR price appended to the right of every orderbook price | orderbook, both sides |
@@ -18,22 +20,25 @@ see [How the orderbook detection works](#how-the-orderbook-detection-works).
 
 ## Install (ScriptCat)
 
+Full walkthrough: **[INSTALL.md](INSTALL.md)** — short version:
+
 1. Install [ScriptCat](https://docs.scriptcat.org/) in your browser.
-2. Install the two scripts from the built files in `dist/` (or from the raw
-   GitHub URL once you push this repo):
+2. Install the two built scripts (click the link, ScriptCat shows the install screen):
 
-   | Script | File | Purpose |
+   | Script | Install link | Purpose |
    | --- | --- | --- |
-   | `TradeCat · IDR Orderbook` | `dist/tradecat-idr.user.js` | the main script |
-   | `TradeCat · USDT/IDR Rate Updater` | `dist/tradecat-rate-updater.user.js` | keeps the rate fresh (background + crontab, every 2h) |
+   | `TradeCat · IDR Orderbook` | [dist/tradecat-idr.user.js](https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js) | the main script |
+   | `TradeCat · USDT/IDR Rate Updater` | [dist/tradecat-rate-updater.user.js](https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js) | keeps the rate fresh (background + crontab, every 2h) |
 
-   In ScriptCat: **Management panel → Scripts → + → Import from file / URL**.
+   The scripts carry `@updateURL`/`@downloadURL`, so ScriptCat will offer updates
+   when `dist/` changes on `main`.
 
 3. Open <https://www.gate.com/trade/BTC_USDT> or
-   <https://www.mexc.fm/exchange/BTC_USDT>. Refresh once after installing.
+   <https://www.mexc.fm/exchange/BTC_USDT> and refresh once.
 
 Both scripts declare `@storageName tradecat`, which is how they share the rate
-(ScriptCat specific feature).
+(ScriptCat specific feature). Without the updater script the orderbook falls back
+to `idr.fallbackRate` (default `18000`).
 
 ---
 
