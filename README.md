@@ -54,6 +54,8 @@ command):
 | `idr.priceFormat` | `full` | `full` = `1.407.000.000`, `compact` = `1,41 M` |
 | `idr.volumeFormat` | `full` | `full`, `compact`, or `auto` (compact when long) |
 | `idr.prefix` | `` (empty) | set to `Rp` if you want `Rp1.407.000.000` |
+| `idr.priceColor` | `#ead05a` | colour of the IDR price badge (empty = inherit the row's red/green) |
+| `idr.volumeColor` | *(empty)* | colour of the converted Total column (empty = inherit) |
 | `idr.showPrice` | `true` | show IDR next to the price |
 | `idr.convertTotal` | `true` | replace `Total (USDT)` with IDR volume |
 | `idr.ttlHours` | `6` | how long a cached rate counts as fresh |

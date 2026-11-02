@@ -15,6 +15,10 @@
       } catch (e) {}
     }
     window.__TRADECAT_SITE__ = params.get('site') || 'gate';
+    var priceColor = params.get('priceColor');
+    if (priceColor !== null) {
+      try { localStorage.setItem('tradecat:idr.priceColor', JSON.stringify(priceColor)); } catch (e) {}
+    }
   })();
 </script>
 <style>

@@ -27,6 +27,10 @@ export interface OrderbookConfig {
   priceMode: IdrMode;
   volumeMode: IdrMode;
   prefix: string;
+  /** Colour for the IDR price badge. Empty = inherit the row colour. */
+  priceColor: string;
+  /** Colour for the IDR volume. Empty = inherit the cell colour. */
+  volumeColor: string;
 }
 
 export interface OrderbookHandle {
@@ -44,18 +48,31 @@ interface Triple {
 const INJECTED = 'tc-injected';
 const PRICE_IDR = 'tc-idr-price';
 
-const PRICE_IDR_STYLE = [
+const PRICE_IDR_BASE_STYLE = [
   'margin-left:6px',
   'font-size:0.82em',
   'font-weight:400',
   'line-height:1',
-  'opacity:0.72',
   'white-space:nowrap',
   'letter-spacing:0',
   'display:inline-block',
   'vertical-align:baseline',
   'pointer-events:none',
-].join(';');
+];
+
+const COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]{3,24}|rgba?\([\d.,%\s/]+\)|hsla?\([\d.,%\s/]+\))$/i;
+
+/** Only let sane CSS colour values through. */
+function sanitizeColor(value: string | null | undefined): string {
+  if (!value) return '';
+  const candidate = String(value).trim();
+  return COLOR_RE.test(candidate) ? candidate : '';
+}
+
+function priceBadgeStyle(config: OrderbookConfig): string {
+  const color = sanitizeColor(config.priceColor);
+  return [...PRICE_IDR_BASE_STYLE, color ? `color:${color}` : 'color:inherit', color ? 'opacity:1' : 'opacity:0.72'].join(';');
+}
 
 /** last text we wrote into an element, so we can still read the site's value */
 const rendered = new WeakMap<HTMLElement, string>();
@@ -270,6 +287,9 @@ function cellOf(leaf: HTMLElement, row: HTMLElement): HTMLElement {
 }
 
 function applyTriples(triples: Triple[], rate: number, config: OrderbookConfig): void {
+  const badgeStyle = priceBadgeStyle(config);
+  const volumeColor = sanitizeColor(config.volumeColor);
+
   for (const triple of triples) {
     if (config.showPrice) {
       const price = parseNumber(siteText(triple.price));
@@ -280,8 +300,11 @@ function applyTriples(triples: Triple[], rate: number, config: OrderbookConfig):
         if (!badge) {
           badge = document.createElement('span');
           badge.className = `${INJECTED} ${PRICE_IDR}`;
-          badge.setAttribute('style', PRICE_IDR_STYLE);
           cell.appendChild(badge);
+        }
+        if (badge.dataset.tcStyle !== badgeStyle) {
+          badge.dataset.tcStyle = badgeStyle;
+          badge.setAttribute('style', badgeStyle);
         }
         if (badge.textContent !== text) badge.textContent = text;
       }
@@ -292,6 +315,12 @@ function applyTriples(triples: Triple[], rate: number, config: OrderbookConfig):
       const original = siteText(target);
       const total = parseNumber(original);
       if (total == null || total <= 0) continue;
+
+      if ((target.dataset.tcVolColor ?? '') !== volumeColor) {
+        target.dataset.tcVolColor = volumeColor;
+        target.style.color = volumeColor;
+      }
+
       const text = formatIdr(total * rate, { prefix: config.prefix, mode: config.volumeMode });
       if (cleanText(target) === text) continue;
       rendered.set(target, text);

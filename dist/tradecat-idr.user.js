@@ -57,6 +57,16 @@ idr:
     description: Text placed before converted numbers. Leave empty for plain numbers, or use "Rp".
     type: text
     default: ""
+  priceColor:
+    title: IDR price colour
+    description: Colour of the IDR number next to the price. Leave empty to inherit the row colour (red/green).
+    type: text
+    default: "#ead05a"
+  volumeColor:
+    title: IDR volume colour
+    description: Colour of the converted Total column. Leave empty to inherit the cell colour.
+    type: text
+    default: ""
   showPrice:
     title: Show IDR next to the orderbook price
     type: checkbox
@@ -407,18 +417,28 @@ coin:
   // src/lib/orderbook.ts
   var INJECTED = "tc-injected";
   var PRICE_IDR = "tc-idr-price";
-  var PRICE_IDR_STYLE = [
+  var PRICE_IDR_BASE_STYLE = [
     "margin-left:6px",
     "font-size:0.82em",
     "font-weight:400",
     "line-height:1",
-    "opacity:0.72",
     "white-space:nowrap",
     "letter-spacing:0",
     "display:inline-block",
     "vertical-align:baseline",
     "pointer-events:none"
-  ].join(";");
+  ];
+  var COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]{3,24}|rgba?\([\d.,%\s/]+\)|hsla?\([\d.,%\s/]+\))$/i;
+  function sanitizeColor(value) {
+    if (!value)
+      return "";
+    const candidate = String(value).trim();
+    return COLOR_RE.test(candidate) ? candidate : "";
+  }
+  function priceBadgeStyle(config) {
+    const color = sanitizeColor(config.priceColor);
+    return [...PRICE_IDR_BASE_STYLE, color ? `color:${color}` : "color:inherit", color ? "opacity:1" : "opacity:0.72"].join(";");
+  }
   var rendered = new WeakMap;
   function cleanText(el) {
     const raw = el.textContent;
@@ -615,6 +635,8 @@ coin:
     return node;
   }
   function applyTriples(triples, rate, config) {
+    const badgeStyle = priceBadgeStyle(config);
+    const volumeColor = sanitizeColor(config.volumeColor);
     for (const triple of triples) {
       if (config.showPrice) {
         const price = parseNumber(siteText(triple.price));
@@ -625,8 +647,11 @@ coin:
           if (!badge) {
             badge = document.createElement("span");
             badge.className = `${INJECTED} ${PRICE_IDR}`;
-            badge.setAttribute("style", PRICE_IDR_STYLE);
             cell.appendChild(badge);
+          }
+          if (badge.dataset.tcStyle !== badgeStyle) {
+            badge.dataset.tcStyle = badgeStyle;
+            badge.setAttribute("style", badgeStyle);
           }
           if (badge.textContent !== text)
             badge.textContent = text;
@@ -638,6 +663,10 @@ coin:
         const total = parseNumber(original);
         if (total == null || total <= 0)
           continue;
+        if ((target.dataset.tcVolColor ?? "") !== volumeColor) {
+          target.dataset.tcVolColor = volumeColor;
+          target.style.color = volumeColor;
+        }
         const text = formatIdr(total * rate, { prefix: config.prefix, mode: config.volumeMode });
         if (cleanText(target) === text)
           continue;
@@ -1202,7 +1231,9 @@ coin:
       convertTotal: bool("idr.convertTotal", true),
       priceMode: asMode(str("idr.priceFormat", "full"), "full"),
       volumeMode: asMode(str("idr.volumeFormat", "full"), "full"),
-      prefix: str("idr.prefix", "")
+      prefix: str("idr.prefix", ""),
+      priceColor: str("idr.priceColor", "#ead05a"),
+      volumeColor: str("idr.volumeColor", "")
     };
     cachedOrderbookConfigAt = now;
     return cachedOrderbookConfig;

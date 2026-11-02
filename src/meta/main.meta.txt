@@ -57,6 +57,16 @@ idr:
     description: Text placed before converted numbers. Leave empty for plain numbers, or use "Rp".
     type: text
     default: ""
+  priceColor:
+    title: IDR price colour
+    description: Colour of the IDR number next to the price. Leave empty to inherit the row colour (red/green).
+    type: text
+    default: "#ead05a"
+  volumeColor:
+    title: IDR volume colour
+    description: Colour of the converted Total column. Leave empty to inherit the cell colour.
+    type: text
+    default: ""
   showPrice:
     title: Show IDR next to the orderbook price
     type: checkbox

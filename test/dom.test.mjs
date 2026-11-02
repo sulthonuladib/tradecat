@@ -91,6 +91,13 @@ function expectCount(html, needle, expected, label) {
   console.error(`  ✗ ${label}\n    expected ${expected}× ${needle}, found ${count}`);
 }
 
+function expectMatch(html, pattern, label) {
+  checks += 1;
+  if (pattern.test(html)) return;
+  failures += 1;
+  console.error(`  ✗ ${label}\n    no match for ${pattern}`);
+}
+
 const idr = (usdt, rate = RATE) => {
   const value = usdt * rate;
   if (Math.abs(value) < 1) {
@@ -168,6 +175,19 @@ async function main() {
     expectContains(html, '"idr.rate":19123', 'idr.rate written');
     expectContains(html, '"idr.source":"indodax"', 'idr.source written');
     expectContains(html, '"idr.updatedAt"', 'idr.updatedAt written');
+  }
+
+  console.log('IDR price colour (default gold, configurable)');
+  {
+    const html = await dumpDom(`/gate.html?rate=${RATE}&site=gate`);
+    // Chrome may serialise the colour as #ead05a or rgb(234, 208, 90)
+    expectMatch(html, /tc-idr-price[^>]*(#ead05a|rgb\(234,\s*208,\s*90\))/i, 'default badge colour is the sample gold');
+
+    const red = await dumpDom(`/gate.html?rate=${RATE}&site=gate&priceColor=%23ff0000`);
+    expectMatch(red, /tc-idr-price[^>]*(#ff0000|rgb\(255,\s*0,\s*0\))/i, 'idr.priceColor override is applied');
+
+    const inherit = await dumpDom(`/gate.html?rate=${RATE}&site=gate&priceColor=`);
+    expectMatch(inherit, /tc-idr-price[^>]*color:\s*inherit/, 'empty priceColor falls back to inherit');
   }
 
   console.log('fallback rate (nothing in storage)');
