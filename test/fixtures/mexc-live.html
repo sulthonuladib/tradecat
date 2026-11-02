@@ -132,6 +132,27 @@
       if (hit) { covered += 1; maxDy = Math.max(maxDy, Math.round(best)); }
     });
     document.documentElement.setAttribute('data-tc-align', covered + '/' + rows.length + ':' + maxDy);
+
+    var volumeRows = 0, hiddenRows = 0;
+    var volumes = [].slice.call(document.querySelectorAll('[class*="idr-volume"]')).filter(function (badge) {
+      return badge.getBoundingClientRect().width > 0;
+    });
+    rows.forEach(function (row) {
+      var cells = [].slice.call(row.children);
+      var total = null;
+      for (var i = 0; i < cells.length; i++) { if (/total/i.test(cells[i].className)) { total = cells[i]; break; } }
+      if (!total) total = cells[cells.length - 1];
+      if (!total) return;
+      if (getComputedStyle(total).color === 'rgba(0, 0, 0, 0)') hiddenRows += 1;
+      var tr = total.getBoundingClientRect();
+      var hit = volumes.some(function (badge) {
+        var br = badge.getBoundingClientRect();
+        return Math.abs(br.top + br.height / 2 - (tr.top + tr.height / 2)) <= tr.height && br.right >= tr.left && br.left <= tr.right;
+      });
+      if (hit) volumeRows += 1;
+    });
+    document.documentElement.setAttribute('data-tc-vol', volumeRows + '/' + rows.length + ':' + hiddenRows);
+
   }, 3000);
 </script>
 </body>

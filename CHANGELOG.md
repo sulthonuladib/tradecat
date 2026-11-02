@@ -3,6 +3,23 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.3
+
+- **Gate volume blink is gone.** Hiding the exchange's Total text with an inline
+  `color: transparent` was lost every time gate replaced that node, so the old
+  USDT value flashed back between ticks. The hide is now injected CSS keyed to
+  the cell and to the list host:
+  `[data-tc-total]`, `[data-tc-host] [class*="totalText"]` (gate) and
+  `[data-tc-host] [class*="__amount"] span` (MEXC). CSS applies to whatever node
+  React renders next, so a re-render cannot expose the old number; the depth bar
+  keeps its background because only text colour is cleared, not the element.
+- `data-tc-total` and `data-tc-host` are removed when a row loses its volume
+  overlay, and the style tag is removed on `stop()`, so disabling the script
+  restores the exchange's own totals.
+- Live measurement: gate 20/20 rows had the exchange total hidden across 50
+  samples at 60 ms, MEXC 18/18, both with 0 stale badges.
+- `bun run live` now reports `hidden` totals and min/max volume coverage.
+
 ## 0.3.2
 
 - **MEXC deposit/withdraw data actually works now.** The panel was calling a

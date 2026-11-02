@@ -47,7 +47,7 @@ const REPORT = `(() => {
   const rows = [...document.querySelectorAll('[class*="depth-list-item"], [class*="orderbookItem"]')];
   const badges = [...document.querySelectorAll('.tc-idr-price')].filter((b) => b.isConnected);
   const volumes = [...document.querySelectorAll('.tc-idr-volume')].filter((b) => b.isConnected && b.getBoundingClientRect().width > 0);
-  let covered = 0, stale = 0, unconverted = 0, maxDy = 0, volumeRows = 0;
+  let covered = 0, stale = 0, unconverted = 0, maxDy = 0, volumeRows = 0, hiddenTotals = 0;
 
   for (const row of rows) {
     const rr = row.getBoundingClientRect();
@@ -83,6 +83,20 @@ const REPORT = `(() => {
     });
     if (volumeBadge) volumeRows += 1;
     else unconverted += 1;
+
+    // The exchange's total text must stay invisible via the injected CSS, even
+    // while the exchange replaces the node underneath. Check the nodes that
+    // actually own text, not just the cell (whose own colour may be normal).
+    if (totalCell) {
+      const owners = [totalCell, ...totalCell.querySelectorAll('*')].filter((el) => {
+        let own = '';
+        for (const node of el.childNodes) if (node.nodeType === 3) own += node.textContent || '';
+        return own.trim().length > 0;
+      });
+      if (owners.length > 0 && owners.every((el) => getComputedStyle(el).color === 'rgba(0, 0, 0, 0)')) {
+        hiddenTotals += 1;
+      }
+    }
   }
 
   const panelHosts = [...document.querySelectorAll('#tradecat-panel-host, tradecat-panel-host')];
@@ -102,6 +116,7 @@ const REPORT = `(() => {
     maxDy,
     volumes: volumes.length,
     volumeRows,
+    hiddenTotals,
     adapter: describe && describe.adapter,
     described: describe && describe.rows,
     panel: panelText,
@@ -209,6 +224,7 @@ async function openPage(url, flags) {
   report.minCovered = Math.min(...samples.map((s) => s.covered));
   report.minVolumes = Math.min(...samples.map((s) => s.volumes));
   report.maxVolumes = Math.max(...samples.map((s) => s.volumes));
+  report.minHidden = Math.min(...samples.map((s) => s.hiddenTotals));
   let screenshot = null;
   if (flags.shot) {
     const area = await evaluate(AREA);
@@ -247,7 +263,7 @@ for (const url of urls) {
       console.log(
         `  adapter=${report.adapter} rows=${report.rows} badges=${report.badges} covered=${report.covered}` +
           ` stale=${report.stale} unconverted=${report.unconverted} maxDy=${report.maxDy}px` +
-          ` volumes=${report.volumes} (min ${report.minVolumes}/${report.maxVolumes}, rows ${report.volumeRows})`,
+          ` volumes=${report.volumes} (min ${report.minVolumes}/${report.maxVolumes}, hidden ${report.minHidden}–${report.rows}, rows ${report.volumeRows})`,
       );
       if (report.sample?.length) console.log(`  sample: ${report.sample[0]}`);
       if (report.panel !== null) {

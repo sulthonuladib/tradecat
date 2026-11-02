@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.2
+// @version      0.3.3
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       tradecat
 // @license      MIT
@@ -928,6 +928,12 @@ coin:
     "font-variant-numeric:tabular-nums",
     "z-index:1"
   ];
+  var VOLUME_CSS = [
+    "[data-tc-total],[data-tc-total] *{color:transparent!important}",
+    '[data-tc-host] [class*="totalText"]{color:transparent!important}',
+    '[data-tc-host] [class*="__amount"] span{color:transparent!important}'
+  ].join(`
+`);
   var LAYER_STYLE = [
     "position:absolute",
     "left:0",
@@ -1033,7 +1039,29 @@ coin:
   }
   var overlays = new Map;
   var layers = new Set;
+  var markedHosts = new Set;
   var hostPositions = new WeakSet;
+  var volumeStyle = null;
+  function ensureVolumeCss() {
+    if (volumeStyle && volumeStyle.isConnected)
+      return;
+    volumeStyle = document.createElement("style");
+    volumeStyle.className = INJECTED;
+    volumeStyle.textContent = VOLUME_CSS;
+    (document.head ?? document.documentElement).appendChild(volumeStyle);
+  }
+  function markHost(host) {
+    if (!hostPositions.has(host)) {
+      hostPositions.add(host);
+      try {
+        if (getComputedStyle(host).position === "static")
+          host.style.position = "relative";
+      } catch {}
+    }
+    if (host.getAttribute("data-tc-host") !== "1")
+      host.setAttribute("data-tc-host", "1");
+    markedHosts.add(host);
+  }
   function layerFor(host) {
     const existing = host.querySelector(":scope > ." + LAYER);
     if (existing)
@@ -1061,10 +1089,9 @@ coin:
     if (kind !== "price") {
       entry.volume?.remove();
       entry.volume = null;
-      if (entry.target) {
-        if (entry.target.isConnected)
-          entry.target.style.color = entry.targetColor;
-        entry.target = null;
+      if (entry.totalCell) {
+        entry.totalCell.removeAttribute("data-tc-total");
+        entry.totalCell = null;
       }
     }
   }
@@ -1075,7 +1102,7 @@ coin:
       entry = undefined;
     }
     if (!entry) {
-      entry = { host, layer: layerFor(host), price: null, volume: null, target: null, targetColor: "" };
+      entry = { host, layer: layerFor(host), price: null, volume: null, totalCell: null };
       overlays.set(rowEl, entry);
     }
     return entry;
@@ -1106,6 +1133,19 @@ coin:
       if (!keepVolume.has(rowEl))
         detach(entry, "volume");
     }
+    for (const host of markedHosts) {
+      let used = false;
+      for (const entry of overlays.values()) {
+        if (entry.host === host && entry.volume) {
+          used = true;
+          break;
+        }
+      }
+      if (!used) {
+        host.removeAttribute("data-tc-host");
+        markedHosts.delete(host);
+      }
+    }
     for (const layer of layers) {
       if (!layer.isConnected) {
         layers.delete(layer);
@@ -1124,6 +1164,11 @@ coin:
     for (const layer of layers)
       layer.remove();
     layers.clear();
+    for (const host of markedHosts)
+      host.removeAttribute("data-tc-host");
+    markedHosts.clear();
+    volumeStyle?.remove();
+    volumeStyle = null;
   }
   function hostFor(row, rowElements) {
     let node = row.parentElement;
@@ -1190,7 +1235,6 @@ coin:
           rowEl: row.row,
           host: hostOf(row),
           cell: row.totalCell,
-          leaf: row.total.el,
           text,
           full,
           textWidth: metrics ? measureText(text, fontFor(metrics, 1)) : text.length * 7,
@@ -1241,14 +1285,14 @@ coin:
       keepVolume.add(write.rowEl);
       const entry = overlayFor(write.rowEl, write.host);
       const badge = makeBadge(entry, "volume");
-      if (entry.target !== write.leaf) {
-        if (entry.target && entry.target.isConnected)
-          entry.target.style.color = entry.targetColor;
-        entry.target = write.leaf;
-        entry.targetColor = write.leaf.style.color || "";
+      ensureVolumeCss();
+      markHost(write.host);
+      if (entry.totalCell !== write.cell) {
+        entry.totalCell?.removeAttribute("data-tc-total");
+        entry.totalCell = write.cell;
       }
-      if (write.leaf.style.color !== "transparent")
-        write.leaf.style.color = "transparent";
+      if (write.cell.getAttribute("data-tc-total") !== "1")
+        write.cell.setAttribute("data-tc-total", "1");
       volumePlaced.push({ write, entry, badge });
     }
     cleanupOverlays(keep, keepPrice, keepVolume);

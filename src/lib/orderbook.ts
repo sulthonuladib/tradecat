@@ -76,6 +76,18 @@ const BADGE_BASE_STYLE = [
   'z-index:1',
 ];
 
+// The exchange's own Total text must be invisible, but hiding it with an inline
+// style breaks as soon as React replaces that node - the old USDT value flashes
+// back between our ticks. These CSS rules apply to whatever node is there now,
+// so a re-render cannot expose it. The depth bar (background only) stays.
+const VOLUME_CSS = [
+  '[data-tc-total],[data-tc-total] *{color:transparent!important}',
+  // gate: the number lives in a *totalText-<hash>* child
+  '[data-tc-host] [class*="totalText"]{color:transparent!important}',
+  // mexc: the number is a span inside the *...__amount* cell
+  '[data-tc-host] [class*="__amount"] span{color:transparent!important}',
+].join('\n');
+
 const LAYER_STYLE = [
   'position:absolute',
   'left:0',
@@ -244,15 +256,36 @@ interface RowOverlay {
   layer: HTMLElement;
   price: HTMLElement | null;
   volume: HTMLElement | null;
-  /** Exchange element whose text we made invisible for the volume overlay. */
-  target: HTMLElement | null;
-  /** Its original inline colour, restored when we let go. */
-  targetColor: string;
+  /** Exchange cell whose text is hidden while the volume overlay is active. */
+  totalCell: HTMLElement | null;
 }
 
 const overlays = new Map<HTMLElement, RowOverlay>();
 const layers = new Set<HTMLElement>();
+const markedHosts = new Set<HTMLElement>();
 const hostPositions = new WeakSet<HTMLElement>();
+let volumeStyle: HTMLStyleElement | null = null;
+
+function ensureVolumeCss(): void {
+  if (volumeStyle && volumeStyle.isConnected) return;
+  volumeStyle = document.createElement('style');
+  volumeStyle.className = INJECTED;
+  volumeStyle.textContent = VOLUME_CSS;
+  (document.head ?? document.documentElement).appendChild(volumeStyle);
+}
+
+function markHost(host: HTMLElement): void {
+  if (!hostPositions.has(host)) {
+    hostPositions.add(host);
+    try {
+      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    } catch {
+      /* ignore */
+    }
+  }
+  if (host.getAttribute('data-tc-host') !== '1') host.setAttribute('data-tc-host', '1');
+  markedHosts.add(host);
+}
 
 function layerFor(host: HTMLElement): HTMLElement {
   const existing = host.querySelector<HTMLElement>(':scope > .' + LAYER);
@@ -284,9 +317,9 @@ function detach(entry: RowOverlay, kind?: BadgeKind): void {
   if (kind !== 'price') {
     entry.volume?.remove();
     entry.volume = null;
-    if (entry.target) {
-      if (entry.target.isConnected) entry.target.style.color = entry.targetColor;
-      entry.target = null;
+    if (entry.totalCell) {
+      entry.totalCell.removeAttribute('data-tc-total');
+      entry.totalCell = null;
     }
   }
 }
@@ -298,7 +331,7 @@ function overlayFor(rowEl: HTMLElement, host: HTMLElement): RowOverlay {
     entry = undefined;
   }
   if (!entry) {
-    entry = { host, layer: layerFor(host), price: null, volume: null, target: null, targetColor: '' };
+    entry = { host, layer: layerFor(host), price: null, volume: null, totalCell: null };
     overlays.set(rowEl, entry);
   }
   return entry;
@@ -331,6 +364,21 @@ function cleanupOverlays(
     if (!keepPrice.has(rowEl)) detach(entry, 'price');
     if (!keepVolume.has(rowEl)) detach(entry, 'volume');
   }
+
+  // Stop hiding a host's total text once we no longer draw a volume over it.
+  for (const host of markedHosts) {
+    let used = false;
+    for (const entry of overlays.values()) {
+      if (entry.host === host && entry.volume) {
+        used = true;
+        break;
+      }
+    }
+    if (!used) {
+      host.removeAttribute('data-tc-host');
+      markedHosts.delete(host);
+    }
+  }
   for (const layer of layers) {
     if (!layer.isConnected) {
       layers.delete(layer);
@@ -349,6 +397,10 @@ function clearOverlays(): void {
   overlays.clear();
   for (const layer of layers) layer.remove();
   layers.clear();
+  for (const host of markedHosts) host.removeAttribute('data-tc-host');
+  markedHosts.clear();
+  volumeStyle?.remove();
+  volumeStyle = null;
 }
 
 /**
@@ -386,7 +438,6 @@ interface VolumeWrite {
   rowEl: HTMLElement;
   host: HTMLElement;
   cell: HTMLElement;
-  leaf: HTMLElement;
   text: string;
   full: string;
   textWidth: number;
@@ -461,7 +512,6 @@ function planRows(
         rowEl: row.row,
         host: hostOf(row),
         cell: row.totalCell,
-        leaf: row.total.el,
         text,
         full,
         textWidth: metrics ? measureText(text, fontFor(metrics, 1)) : text.length * 7,
@@ -534,13 +584,15 @@ function applyOverlays(
     const entry = overlayFor(write.rowEl, write.host);
     const badge = makeBadge(entry, 'volume');
 
-    // Let the exchange keep updating its own total text, but keep it invisible.
-    if (entry.target !== write.leaf) {
-      if (entry.target && entry.target.isConnected) entry.target.style.color = entry.targetColor;
-      entry.target = write.leaf;
-      entry.targetColor = write.leaf.style.color || '';
+    // Hide the exchange's total text with CSS, not an inline colour: React may
+    // replace this node at any time and the rule still applies to the new one.
+    ensureVolumeCss();
+    markHost(write.host);
+    if (entry.totalCell !== write.cell) {
+      entry.totalCell?.removeAttribute('data-tc-total');
+      entry.totalCell = write.cell;
     }
-    if (write.leaf.style.color !== 'transparent') write.leaf.style.color = 'transparent';
+    if (write.cell.getAttribute('data-tc-total') !== '1') write.cell.setAttribute('data-tc-total', '1');
 
     volumePlaced.push({ write, entry, badge });
   }
