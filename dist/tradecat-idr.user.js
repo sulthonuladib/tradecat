@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.2.0
+// @version      0.3.0
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       tradecat
 // @license      MIT
@@ -67,6 +67,11 @@ idr:
     description: Colour of the converted Total column. Leave empty to inherit the cell colour.
     type: text
     default: ""
+  fit:
+    title: Shrink numbers that do not fit
+    description: When the full IDR number is wider than the orderbook cell, switch to compact (1,44 M) instead of letting it get clipped. The full value stays in the tooltip.
+    type: checkbox
+    default: true
   showPrice:
     title: Show IDR next to the orderbook price
     type: checkbox
@@ -116,9 +121,11 @@ coin:
   }
   function currentPair(path = location.pathname) {
     const match = path.match(/\/(?:trade|exchange|spot)\/([A-Za-z0-9]{1,12})[_-]([A-Za-z0-9]{1,12})/);
-    if (!match)
+    const base = match?.[1];
+    const quote = match?.[2];
+    if (!base || !quote)
       return null;
-    return { base: match[1].toUpperCase(), quote: match[2].toUpperCase() };
+    return { base: base.toUpperCase(), quote: quote.toUpperCase() };
   }
   function depositUrl(site, coin) {
     const origin = location.origin && location.origin !== "null" ? location.origin : "https://www.gate.com";
@@ -219,7 +226,7 @@ coin:
     {
       id: "indodax",
       label: "Indodax USDT/IDR",
-      url: "https://indodax.com/api/ticker/usdt_idr",
+      url: "https://indodax.com/api/ticker/usdtidr",
       parse: (body) => numberOrNull(body?.ticker?.last)
     },
     {
@@ -309,6 +316,105 @@ coin:
     return snapshot;
   }
 
+  // src/lib/dom.ts
+  var INJECTED = "tc-injected";
+  var PRICE_IDR = "tc-idr-price";
+  var SKIP_TAGS = new Set([
+    "SCRIPT",
+    "STYLE",
+    "NOSCRIPT",
+    "CANVAS",
+    "INPUT",
+    "TEXTAREA",
+    "SELECT",
+    "OPTION",
+    "svg",
+    "path",
+    "TEMPLATE"
+  ]);
+  function cleanText(el) {
+    const raw = el.textContent;
+    if (!raw)
+      return "";
+    if (!el.querySelector("." + INJECTED))
+      return raw.trim();
+    let out = "";
+    const visit = (node) => {
+      node.childNodes.forEach((child) => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          out += child.textContent ?? "";
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          const childEl = child;
+          if (!childEl.classList.contains(INJECTED))
+            visit(childEl);
+        }
+      });
+    };
+    visit(el);
+    return out.trim();
+  }
+  var rendered = new WeakMap;
+  function markRendered(el, text) {
+    rendered.set(el, text);
+  }
+  function siteText(el) {
+    const current = cleanText(el);
+    const previous = rendered.get(el);
+    if (previous !== undefined && previous === current) {
+      const original = el.dataset["tcOrig"];
+      if (original !== undefined)
+        return original;
+    }
+    return current;
+  }
+  function isVisible(el) {
+    if (el.hidden)
+      return false;
+    if (el.getAttribute("aria-hidden") === "true")
+      return false;
+    const candidate = el;
+    if (typeof candidate.checkVisibility === "function") {
+      try {
+        return candidate.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true });
+      } catch {}
+    }
+    return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
+  }
+  function walkLeaves(root, out, maxLeaves = 1200, maxNodes = 20000) {
+    let visited = 0;
+    const filter = {
+      acceptNode(node) {
+        const el = node;
+        visited += 1;
+        if (visited > maxNodes || out.length >= maxLeaves)
+          return NodeFilter.FILTER_REJECT;
+        if (SKIP_TAGS.has(el.tagName))
+          return NodeFilter.FILTER_REJECT;
+        if (el.classList.contains(INJECTED))
+          return NodeFilter.FILTER_REJECT;
+        const kids = el.children;
+        for (let index = 0;index < kids.length; index += 1) {
+          const kid = kids[index];
+          if (kid && !kid.classList.contains(INJECTED))
+            return NodeFilter.FILTER_SKIP;
+        }
+        const text = cleanText(el);
+        if (!text || text.length > 32)
+          return NodeFilter.FILTER_REJECT;
+        out.push(el);
+        return NodeFilter.FILTER_REJECT;
+      }
+    };
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, filter);
+    walker.nextNode();
+  }
+  function cellOf(leaf, row) {
+    let node = leaf;
+    while (node.parentElement && node.parentElement !== row)
+      node = node.parentElement;
+    return node;
+  }
+
   // src/lib/format.ts
   var UNIT = {
     k: 1000,
@@ -319,6 +425,27 @@ coin:
     "亿": 1e8
   };
   var SEP_SPACE = /[\s\u00a0\u202f\u2009\u2007\u2008]/g;
+  var SUBSCRIPT_DIGITS = {
+    "₀": "0",
+    "₁": "1",
+    "₂": "2",
+    "₃": "3",
+    "₄": "4",
+    "₅": "5",
+    "₆": "6",
+    "₇": "7",
+    "₈": "8",
+    "₉": "9"
+  };
+  function expandCollapsed(input) {
+    return input.replace(/\{(\d{1,3})\}|([₀-₉]+)/g, (match, braces, subs) => {
+      const subscript = subs ? Number([...subs].map((char) => SUBSCRIPT_DIGITS[char] ?? "").join("")) : NaN;
+      const count = braces ? Number(braces) : subscript;
+      if (!Number.isFinite(count) || count < 1)
+        return match;
+      return "0".repeat(Math.min(24, count - 1));
+    });
+  }
   function parseNumber(input) {
     return parseNumberInfo(input)?.value ?? null;
   }
@@ -329,17 +456,20 @@ coin:
     if (input == null)
       return null;
     let s = String(input).replace(SEP_SPACE, "");
-    s = s.replace(/[^0-9.,+\-A-Za-z万亿]/g, "");
+    s = s.replace(/[^0-9.,+\-A-Za-z万亿{}₀-₉]/g, "");
     if (!s)
       return null;
+    if (s.includes(".") && (s.includes("{") || /[₀-₉]/.test(s))) {
+      s = expandCollapsed(s);
+    }
     let mult = 1;
     const unitMatch = s.match(/([0-9.,])([kKmMbBtT万亿])$/);
-    if (unitMatch) {
-      const key = unitMatch[2];
-      mult = UNIT[key.toLowerCase()] ?? UNIT[key] ?? 1;
+    const unitKey = unitMatch?.[2];
+    if (unitKey) {
+      mult = UNIT[unitKey.toLowerCase()] ?? UNIT[unitKey] ?? 1;
       s = s.slice(0, -1);
     }
-    s = s.replace(/[A-Za-z万亿]/g, "");
+    s = s.replace(/[A-Za-z万亿{}₀-₉]/g, "");
     const negative = /^-/.test(s);
     s = s.replace(/[+\-]/g, "");
     if (!s || !/\d/.test(s))
@@ -356,7 +486,7 @@ coin:
     } else if (dots === 1) {
       norm = s;
     } else if (commas === 1) {
-      const [intPart, fracPart] = s.split(",");
+      const [intPart = "", fracPart = ""] = s.split(",");
       const looksLikeThousands = intPart !== "0" && /^\d{1,3}$/.test(intPart) && fracPart.length === 3;
       norm = looksLikeThousands ? intPart + fracPart : s.replace(",", ".");
     } else {
@@ -365,7 +495,7 @@ coin:
     const n = Number(norm);
     if (!Number.isFinite(n))
       return null;
-    const decimals = norm.includes(".") ? norm.split(".")[1].length : 0;
+    const decimals = norm.includes(".") ? (norm.split(".")[1] ?? "").length : 0;
     const step = Math.pow(10, -decimals) * mult;
     return { value: negative ? -n * mult : n * mult, step };
   }
@@ -414,20 +544,331 @@ coin:
     return full;
   }
 
-  // src/lib/orderbook.ts
-  var INJECTED = "tc-injected";
-  var PRICE_IDR = "tc-idr-price";
-  var PRICE_IDR_BASE_STYLE = [
-    "margin-left:6px",
-    "font-size:0.82em",
-    "font-weight:400",
-    "line-height:1",
-    "white-space:nowrap",
-    "letter-spacing:0",
-    "display:inline-block",
-    "vertical-align:baseline",
-    "pointer-events:none"
+  // src/lib/detect.ts
+  var MAX_ROW_NUMBERS = 8;
+  function leavesOf(el, limit = 10) {
+    const els = [];
+    walkLeaves(el, els, 32, 800);
+    const out = [];
+    for (const node of els) {
+      if (out.length >= limit)
+        break;
+      if (!isVisible(node))
+        continue;
+      const text = siteText(node);
+      const info = parseNumberInfo(text);
+      if (!info || !(info.value > 0))
+        continue;
+      out.push({ el: node, text, value: info.value, step: info.step });
+    }
+    return out;
+  }
+  function matches(price, amount, total) {
+    const tolerance = Math.max(total.value * 0.02, total.step * 1.05, price.value * amount.step * 1.05) + 0.000000000001;
+    return Math.abs(price.value * amount.value - total.value) <= tolerance;
+  }
+  function findTriple(leaves) {
+    const count = Math.min(leaves.length, MAX_ROW_NUMBERS + 2);
+    let best = null;
+    for (let i = 0;i < count; i += 1) {
+      const price = leaves[i];
+      if (!price)
+        continue;
+      for (let j = i + 1;j < count; j += 1) {
+        const amount = leaves[j];
+        if (!amount)
+          continue;
+        for (let k = j + 1;k < count; k += 1) {
+          const total = leaves[k];
+          if (!total)
+            continue;
+          if (!matches(price, amount, total))
+            continue;
+          const candidate = { price, amount, total, key: `${i},${j},${k}`, span: k - i };
+          if (!best || candidate.span < best.span || candidate.span === best.span && candidate.key < best.key) {
+            best = candidate;
+          }
+        }
+      }
+    }
+    return best;
+  }
+  function toOrderRow(row, triple) {
+    return {
+      row,
+      price: triple.price,
+      amount: triple.amount,
+      total: triple.total,
+      priceCell: cellOf(triple.price.el, row),
+      totalCell: cellOf(triple.total.el, row),
+      key: triple.key
+    };
+  }
+  function rowTriple(row) {
+    const leaves = leavesOf(row, MAX_ROW_NUMBERS + 2);
+    if (leaves.length < 3)
+      return null;
+    const triple = findTriple(leaves);
+    return triple ? toOrderRow(row, triple) : null;
+  }
+  function dominantKey(rows) {
+    const votes = new Map;
+    for (const row of rows)
+      votes.set(row.key, (votes.get(row.key) ?? 0) + 1);
+    let best = null;
+    let bestCount = 0;
+    for (const [key, count] of votes) {
+      if (count > bestCount) {
+        best = key;
+        bestCount = count;
+      }
+    }
+    return best;
+  }
+  function detectRowGroups(scope, options = {}) {
+    const minRows = options.minRows ?? 2;
+    const leaves = [];
+    const els = [];
+    walkLeaves(scope, els, options.maxLeaves ?? 1500, options.maxNodes ?? 20000);
+    for (const el of els) {
+      if (!isVisible(el))
+        continue;
+      const info = parseNumberInfo(siteText(el));
+      if (!info || !(info.value > 0))
+        continue;
+      leaves.push({ el, text: siteText(el), value: info.value, step: info.step });
+    }
+    if (leaves.length < 3)
+      return [];
+    const buckets = new Map;
+    for (const leaf of leaves) {
+      let node = leaf.el.parentElement;
+      for (let depth = 0;node && depth < 10; depth += 1, node = node.parentElement) {
+        const bucket = buckets.get(node);
+        if (bucket)
+          bucket.push(leaf);
+        else
+          buckets.set(node, [leaf]);
+      }
+    }
+    const groups = [];
+    for (const [parent, numbers] of buckets) {
+      if (numbers.length < minRows * 2)
+        continue;
+      const kids = Array.from(parent.children).filter((kid) => kid instanceof HTMLElement && !kid.classList.contains(INJECTED));
+      if (kids.length < minRows || kids.length > 96)
+        continue;
+      const candidates = [];
+      let rowLikeKids = 0;
+      for (const kid of kids) {
+        const own = numbers.filter((leaf) => kid.contains(leaf.el));
+        if (own.length === 0)
+          continue;
+        if (own.length > MAX_ROW_NUMBERS) {
+          rowLikeKids = 0;
+          break;
+        }
+        if (own.length < 2)
+          continue;
+        const triple = findTriple(own);
+        if (!triple)
+          continue;
+        rowLikeKids += 1;
+        candidates.push(toOrderRow(kid, triple));
+      }
+      if (rowLikeKids < minRows)
+        continue;
+      if (rowLikeKids / kids.length < 0.6)
+        continue;
+      const key = dominantKey(candidates);
+      if (!key)
+        continue;
+      const rows = candidates.filter((row) => row.key === key);
+      if (rows.length < minRows)
+        continue;
+      groups.push({ parent, rows });
+    }
+    return groups;
+  }
+  function related(a, b) {
+    if (a === b)
+      return true;
+    let node = a;
+    for (let depth = 0;node && depth < 4; depth += 1, node = node.parentElement) {
+      if (node === b || node.contains(b))
+        return true;
+    }
+    node = b;
+    for (let depth = 0;node && depth < 4; depth += 1, node = node.parentElement) {
+      if (node === a || node.contains(a))
+        return true;
+    }
+    return false;
+  }
+  function chooseRows(groups) {
+    if (groups.length === 0)
+      return [];
+    const ranked = [...groups].sort((a, b) => b.rows.length - a.rows.length);
+    const anchor = ranked[0];
+    if (!anchor)
+      return [];
+    const minimum = Math.max(2, Math.floor(anchor.rows.length * 0.4));
+    const rows = [];
+    const seen = new Set;
+    const chosen = [];
+    const overlaps = (el) => {
+      for (const existing of chosen) {
+        if (existing.contains(el) || el.contains(existing))
+          return true;
+      }
+      return false;
+    };
+    for (const group of ranked) {
+      if (group !== anchor && (group.rows.length < minimum || !related(group.parent, anchor.parent)))
+        continue;
+      for (const row of group.rows) {
+        if (seen.has(row.row) || overlaps(row.row))
+          continue;
+        seen.add(row.row);
+        chosen.push(row.row);
+        rows.push(row);
+      }
+    }
+    return rows;
+  }
+  function detectRows(scope, minRows = 2) {
+    return chooseRows(detectRowGroups(scope, { minRows }));
+  }
+
+  // src/lib/exchanges/gate.ts
+  var SCOPES = [
+    '[id*="market-list" i]',
+    '[class*="orderbook" i]',
+    '[class*="order-book" i]',
+    '[class*="order_book" i]',
+    '[class*="entrust" i]',
+    '[class*="trade-grid" i]',
+    '[id*="orderbook" i]'
   ];
+  function rowsIn(scope, minRows) {
+    return chooseRows(detectRowGroups(scope, { minRows, maxNodes: 12000 }));
+  }
+  var gateAdapter = {
+    id: "gate",
+    cacheMs: 1200,
+    locate(doc) {
+      let single = null;
+      for (const selector of SCOPES) {
+        let nodes;
+        try {
+          nodes = doc.querySelectorAll(selector);
+        } catch {
+          continue;
+        }
+        for (const scope of nodes) {
+          if (scope === doc.body || scope === doc.documentElement)
+            continue;
+          const rows = rowsIn(scope, 2);
+          if (rows.length >= 2)
+            return rows;
+          if (!single && rows.length === 1)
+            single = rows;
+        }
+      }
+      if (single)
+        return single;
+      return rowsIn(doc.body, 2);
+    }
+  };
+
+  // src/lib/exchanges/generic.ts
+  var genericAdapter = {
+    id: "generic",
+    cacheMs: 1500,
+    locate(doc) {
+      const scope = doc.body;
+      if (!scope)
+        return null;
+      const rows = chooseRows(detectRowGroups(scope, { minRows: 3, maxNodes: 25000, maxLeaves: 2000 }));
+      return rows.length ? rows : null;
+    }
+  };
+
+  // src/lib/exchanges/mexc.ts
+  var ITEM_SELECTORS = [
+    '[class*="orderbookItem" i]',
+    '[class*="orderbook-item" i]',
+    '[class*="orderBookItem" i]'
+  ];
+  var BOX_SELECTORS = [
+    '[class*="asksBox" i]',
+    '[class*="bidsBox" i]',
+    '[class*="asks" i]',
+    '[class*="bids" i]'
+  ];
+  function locateItems(doc) {
+    for (const selector of ITEM_SELECTORS) {
+      let items;
+      try {
+        items = doc.querySelectorAll(selector);
+      } catch {
+        continue;
+      }
+      if (items.length === 0)
+        continue;
+      const rows = [];
+      for (const item of items) {
+        const row = rowTriple(item);
+        if (row)
+          rows.push(row);
+      }
+      if (rows.length > 0)
+        return rows;
+    }
+    return [];
+  }
+  function locateBoxes(doc) {
+    const groups = [];
+    for (const selector of BOX_SELECTORS) {
+      let boxes;
+      try {
+        boxes = doc.querySelectorAll(selector);
+      } catch {
+        continue;
+      }
+      for (const box of boxes) {
+        for (const group of detectRowGroups(box, { minRows: 2, maxNodes: 3000 }))
+          groups.push(group);
+      }
+    }
+    return chooseRows(groups);
+  }
+  var mexcAdapter = {
+    id: "mexc",
+    cacheMs: 300,
+    locate(doc) {
+      const items = locateItems(doc);
+      if (items.length > 0)
+        return items;
+      const boxes = locateBoxes(doc);
+      if (boxes.length > 0)
+        return boxes;
+      const rows = detectRows(doc.body, 2);
+      return rows.length > 0 ? rows : null;
+    }
+  };
+
+  // src/lib/exchanges/index.ts
+  var ADAPTERS = {
+    gate: gateAdapter,
+    mexc: mexcAdapter,
+    generic: genericAdapter
+  };
+  function adapterFor(site = detectSite()) {
+    return ADAPTERS[site] ?? genericAdapter;
+  }
+
+  // src/lib/orderbook.ts
   var COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]{3,24}|rgba?\([\d.,%\s/]+\)|hsla?\([\d.,%\s/]+\))$/i;
   function sanitizeColor(value) {
     if (!value)
@@ -435,300 +876,226 @@ coin:
     const candidate = String(value).trim();
     return COLOR_RE.test(candidate) ? candidate : "";
   }
-  function priceBadgeStyle(config) {
+  var PRICE_IDR_BASE_STYLE = [
+    "font-weight:400",
+    "line-height:1",
+    "white-space:nowrap",
+    "letter-spacing:0",
+    "display:inline-block",
+    "vertical-align:baseline",
+    "pointer-events:none",
+    "user-select:none",
+    "font-variant-numeric:tabular-nums"
+  ];
+  function priceBadgeStyle(config, fontSizeEm, gapPx) {
     const color = sanitizeColor(config.priceColor);
-    return [...PRICE_IDR_BASE_STYLE, color ? `color:${color}` : "color:inherit", color ? "opacity:1" : "opacity:0.72"].join(";");
+    return [
+      ...PRICE_IDR_BASE_STYLE,
+      `margin-left:${gapPx}px`,
+      `font-size:${fontSizeEm}em`,
+      `color:${color || "inherit"}`,
+      `opacity:${color ? "1" : "0.72"}`
+    ].join(";");
   }
-  var rendered = new WeakMap;
-  function cleanText(el) {
-    const raw = el.textContent;
-    if (!raw)
-      return "";
-    if (!el.querySelector("." + INJECTED))
-      return raw.trim();
-    let out = "";
-    const visit = (node) => {
-      node.childNodes.forEach((child) => {
-        if (child.nodeType === Node.TEXT_NODE) {
-          out += child.textContent ?? "";
-        } else if (child.nodeType === Node.ELEMENT_NODE) {
-          const childEl = child;
-          if (!childEl.classList.contains(INJECTED))
-            visit(childEl);
-        }
-      });
+  function ensureBadge(cell) {
+    let badge = cell.querySelector(":scope > ." + PRICE_IDR);
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = `${INJECTED} ${PRICE_IDR}`;
+      badge.setAttribute("aria-hidden", "true");
+      cell.appendChild(badge);
+    }
+    return badge;
+  }
+  var metricsCache = new WeakMap;
+  var widthEpoch = 0;
+  if (typeof window !== "undefined") {
+    window.addEventListener("resize", () => {
+      widthEpoch += 1;
+    }, { passive: true });
+  }
+  var canvasCtx;
+  function measureText(text, font) {
+    if (!text)
+      return 0;
+    if (canvasCtx === undefined) {
+      try {
+        canvasCtx = document.createElement("canvas").getContext("2d");
+      } catch {
+        canvasCtx = null;
+      }
+    }
+    if (!canvasCtx)
+      return text.length * 7;
+    canvasCtx.font = font;
+    return canvasCtx.measureText(text).width;
+  }
+  function metricsFor(cell) {
+    const cached = metricsCache.get(cell);
+    if (cached && cached.epoch === widthEpoch)
+      return cached;
+    let style;
+    try {
+      style = getComputedStyle(cell);
+    } catch {
+      return null;
+    }
+    const fontPx = parseFloat(style.fontSize) || 12;
+    const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const contentWidth = cell.clientWidth - padding;
+    if (!(contentWidth > 0))
+      return null;
+    const metrics = {
+      contentWidth,
+      fontPx,
+      weight: style.fontWeight || "400",
+      family: style.fontFamily || "sans-serif",
+      epoch: widthEpoch
     };
-    visit(el);
-    return out.trim();
+    metricsCache.set(cell, metrics);
+    return metrics;
   }
-  function siteText(el) {
-    const current = cleanText(el);
-    const previous = rendered.get(el);
-    if (previous !== undefined && previous === current) {
-      const original = el.dataset.tcOrig;
-      if (original !== undefined)
-        return original;
-    }
-    return current;
+  function choosePriceText(full, compact, priceText, metrics, fit) {
+    const regular = { text: full, fontEm: 0.82, gapPx: 6 };
+    if (!fit || !metrics)
+      return regular;
+    const font = (em) => `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
+    const base = measureText(priceText, font(1));
+    const tight = compact.replace(/\s+/g, "");
+    const fits = (text, em, gap) => base + gap + measureText(text, font(em)) <= metrics.contentWidth + 0.5;
+    if (fits(regular.text, regular.fontEm, regular.gapPx))
+      return regular;
+    const compactChoice = { text: compact, fontEm: 0.82, gapPx: 6 };
+    if (fits(compactChoice.text, compactChoice.fontEm, compactChoice.gapPx))
+      return compactChoice;
+    const tightChoice = { text: tight, fontEm: 0.68, gapPx: 4 };
+    if (fits(tightChoice.text, tightChoice.fontEm, tightChoice.gapPx))
+      return tightChoice;
+    return { text: tight, fontEm: 0.62, gapPx: 2 };
   }
-  var SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "CANVAS", "INPUT", "TEXTAREA", "SELECT", "OPTION", "svg", "path"]);
-  function walkLeaves(root, out, maxLeaves = 1200, maxNodes = 20000) {
-    let visited = 0;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
-      acceptNode(node) {
-        const el = node;
-        visited += 1;
-        if (visited > maxNodes || out.length >= maxLeaves)
-          return NodeFilter.FILTER_REJECT;
-        if (SKIP_TAGS.has(el.tagName))
-          return NodeFilter.FILTER_REJECT;
-        if (el.classList && el.classList.contains(INJECTED))
-          return NodeFilter.FILTER_REJECT;
-        const kids = el.children;
-        let hasRealChild = false;
-        for (let index = 0;index < kids.length; index += 1) {
-          if (!kids[index].classList.contains(INJECTED)) {
-            hasRealChild = true;
-            break;
-          }
-        }
-        if (hasRealChild)
-          return NodeFilter.FILTER_SKIP;
-        const text = cleanText(el);
-        if (!text || text.length > 24)
-          return NodeFilter.FILTER_REJECT;
-        out.push(el);
-        return NodeFilter.FILTER_REJECT;
-      }
-    });
-    walker.nextNode();
+  function chooseVolumeText(full, compact, metrics, fit) {
+    if (!fit || !metrics)
+      return full;
+    const font = `${metrics.weight} ${metrics.fontPx}px ${metrics.family}`;
+    return measureText(full, font) <= metrics.contentWidth + 0.5 ? full : compact;
   }
-  function lowestCommonAncestor(a, b) {
-    const ancestors = new Set;
-    for (let node = a;node; node = node.parentNode)
-      ancestors.add(node);
-    for (let node = b;node; node = node.parentNode) {
-      if (ancestors.has(node))
-        return node;
-    }
-    return null;
-  }
-  function numericLeavesIn(row, leaves, parsed) {
-    let count = 0;
-    for (let index = 0;index < leaves.length; index += 1) {
-      if (parsed[index] == null)
-        continue;
-      if (row.contains(leaves[index])) {
-        count += 1;
-        if (count > 8)
-          break;
-      }
-    }
-    return count;
-  }
-  function collectTriples(root) {
-    const leaves = [];
-    walkLeaves(root, leaves);
-    if (leaves.length < 3)
-      return [];
-    const parsed = leaves.map((el) => parseNumberInfo(siteText(el)));
-    const triples = [];
-    const seen = new Set;
-    let i = 0;
-    while (i < leaves.length) {
-      const priceInfo = parsed[i];
-      if (!priceInfo || priceInfo.value <= 0) {
-        i += 1;
-        continue;
-      }
-      const price = priceInfo.value;
-      let matched = false;
-      const maxJ = Math.min(i + 5, leaves.length);
-      for (let j = i + 1;j < maxJ && !matched; j += 1) {
-        const amountInfo = parsed[j];
-        if (!amountInfo || amountInfo.value <= 0)
-          continue;
-        const amount = amountInfo.value;
-        const maxK = Math.min(j + 5, leaves.length);
-        for (let k = j + 1;k < maxK; k += 1) {
-          const totalInfo = parsed[k];
-          if (!totalInfo || totalInfo.value <= 0)
-            continue;
-          const total = totalInfo.value;
-          const tolerance = Math.max(total * 0.02, totalInfo.step * 1.05, price * amountInfo.step * 1.05) + 0.000000000001;
-          if (Math.abs(price * amount - total) > tolerance)
-            continue;
-          const rowNode = lowestCommonAncestor(leaves[i], lowestCommonAncestor(leaves[j], leaves[k]) ?? leaves[k]);
-          if (!rowNode || !(rowNode instanceof HTMLElement) || rowNode === root || !root.contains(rowNode))
-            continue;
-          const numeric = numericLeavesIn(rowNode, leaves, parsed);
-          if (numeric < 3 || numeric > 8)
-            continue;
-          if (seen.has(rowNode))
-            continue;
-          seen.add(rowNode);
-          triples.push({ row: rowNode, price: leaves[i], amount: leaves[j], total: leaves[k] });
-          i = k + 1;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched)
-        i += 1;
-    }
-    return triples;
-  }
-  function headerKey(text) {
-    return text.toLowerCase().replace(/[^a-z]/g, "");
-  }
-  var PRICE_HEADER_KEYS = new Set(["priceusdt", "pricetusdt", "priceusdtprice"]);
-  var TOTAL_HEADER_KEYS = new Set(["totalusdt", "totaltusdt"]);
-  function isPriceHeader(text) {
-    return PRICE_HEADER_KEYS.has(headerKey(text));
-  }
-  function isTotalHeader(text) {
-    return TOTAL_HEADER_KEYS.has(headerKey(text));
-  }
-  function findHeaders(doc) {
-    const result = {};
-    const body = doc.body;
-    if (!body)
-      return result;
-    const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const raw = (node.nodeValue || "").trim();
-        if (!raw || raw.length > 24)
-          return NodeFilter.FILTER_REJECT;
-        const parent = node.parentElement;
-        if (!parent || SKIP_TAGS.has(parent.tagName))
-          return NodeFilter.FILTER_REJECT;
-        const text = parent.children.length === 0 ? (parent.textContent || "").trim() : raw;
-        if (isPriceHeader(text)) {
-          if (!result.price)
-            result.price = parent;
-        } else if (isTotalHeader(text)) {
-          if (!result.total)
-            result.total = parent;
-        }
-        return NodeFilter.FILTER_REJECT;
-      }
-    });
-    walker.nextNode();
-    return result;
-  }
-  function findContainer(anchor, totalHeader) {
-    let fallback = null;
-    let node = anchor;
-    for (let depth = 0;node && depth < 14; depth += 1, node = node.parentElement) {
-      const triples = collectTriples(node);
-      if (triples.length >= 2)
-        return node;
-      if (!fallback && triples.length === 1 && totalHeader && node.contains(totalHeader))
-        fallback = node;
-    }
-    return fallback;
-  }
-  function cellOf(leaf, row) {
-    let node = leaf;
-    while (node.parentElement && node.parentElement !== row)
-      node = node.parentElement;
-    return node;
-  }
-  function applyTriples(triples, rate, config) {
-    const badgeStyle = priceBadgeStyle(config);
+  function planRows(rows, rate, config) {
+    const prices = [];
+    const volumes = [];
     const volumeColor = sanitizeColor(config.volumeColor);
-    for (const triple of triples) {
-      if (config.showPrice) {
-        const price = parseNumber(siteText(triple.price));
-        if (price != null && price > 0) {
-          const text = formatIdr(price * rate, { prefix: config.prefix, mode: config.priceMode });
-          const cell = cellOf(triple.price, triple.row);
-          let badge = cell.querySelector(":scope > ." + PRICE_IDR);
-          if (!badge) {
-            badge = document.createElement("span");
-            badge.className = `${INJECTED} ${PRICE_IDR}`;
-            cell.appendChild(badge);
-          }
-          if (badge.dataset.tcStyle !== badgeStyle) {
-            badge.dataset.tcStyle = badgeStyle;
-            badge.setAttribute("style", badgeStyle);
-          }
-          if (badge.textContent !== text)
-            badge.textContent = text;
-        }
+    for (const row of rows) {
+      const priceText = siteText(row.price.el);
+      const price = parseNumber(priceText);
+      if (config.showPrice && price != null && price > 0) {
+        const idr = price * rate;
+        const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
+        const compact = formatIdr(idr, { prefix: config.prefix, mode: "compact" });
+        const metrics = metricsFor(row.priceCell);
+        const choice = choosePriceText(full, compact, priceText, metrics, config.fit);
+        prices.push({
+          cell: row.priceCell,
+          text: choice.text,
+          full,
+          style: priceBadgeStyle(config, choice.fontEm, choice.gapPx)
+        });
       }
       if (config.convertTotal) {
-        const target = triple.total;
-        const original = siteText(target);
+        const original = siteText(row.total.el);
         const total = parseNumber(original);
         if (total == null || total <= 0)
           continue;
-        if ((target.dataset.tcVolColor ?? "") !== volumeColor) {
-          target.dataset.tcVolColor = volumeColor;
-          target.style.color = volumeColor;
-        }
-        const text = formatIdr(total * rate, { prefix: config.prefix, mode: config.volumeMode });
-        if (cleanText(target) === text)
-          continue;
-        rendered.set(target, text);
-        target.dataset.tcOrig = original;
-        target.textContent = text;
+        const idr = total * rate;
+        const full = formatIdr(idr, { prefix: config.prefix, mode: config.volumeMode });
+        const compact = formatIdr(idr, { prefix: config.prefix, mode: "compact" });
+        const metrics = metricsFor(row.totalCell);
+        volumes.push({
+          target: row.total.el,
+          text: chooseVolumeText(full, compact, metrics, config.fit),
+          original,
+          color: volumeColor
+        });
       }
     }
+    return { prices, volumes };
   }
-  function describeOrderbook() {
-    const headers = findHeaders(document);
-    const anchor = headers.price ?? headers.total ?? null;
-    const container = anchor ? findContainer(anchor, headers.total) : null;
-    const triples = container ? collectTriples(container) : [];
+  function applyPlan(plan) {
+    for (const write of plan.prices) {
+      const badge = ensureBadge(write.cell);
+      if (badge.dataset["tcStyle"] !== write.style) {
+        badge.dataset["tcStyle"] = write.style;
+        badge.setAttribute("style", write.style);
+      }
+      if (badge.textContent !== write.text)
+        badge.textContent = write.text;
+      if (badge.getAttribute("title") !== write.full)
+        badge.setAttribute("title", write.full);
+    }
+    for (const write of plan.volumes) {
+      if (write.color) {
+        if (write.target.style.color !== write.color)
+          write.target.style.color = write.color;
+      }
+      if (cleanText(write.target) === write.text)
+        continue;
+      markRendered(write.target, write.text);
+      write.target.dataset["tcOrig"] = write.original;
+      write.target.textContent = write.text;
+    }
+  }
+  function rootFor(rows) {
+    const first = rows[0];
+    if (!first)
+      return null;
+    let node = first.row.parentElement;
+    for (let depth = 0;node && depth < 12; depth += 1, node = node.parentElement) {
+      if (rows.every((row) => node?.contains(row.row)))
+        return node;
+    }
+    return first.row.parentElement;
+  }
+  function describeOrderbook(site) {
+    const adapter = adapterFor(site);
+    const rows = adapter.locate(document) ?? [];
     return {
-      header: anchor ? cleanText(anchor) : null,
-      container: container ? `${container.tagName.toLowerCase()}${container.className ? "." + String(container.className).split(/\s+/).join(".") : ""}` : null,
-      rows: triples.length,
-      sample: triples.slice(0, 3).map((t) => `${siteText(t.price)} × ${siteText(t.amount)} = ${siteText(t.total)}`)
+      adapter: adapter.id,
+      rows: rows.length,
+      sample: rows.slice(0, 3).map((row) => {
+        const amount = row.amount ? siteText(row.amount.el) : "?";
+        return `${siteText(row.price.el)} × ${amount} = ${siteText(row.total.el)}`;
+      })
     };
   }
   function startOrderbook(options) {
-    let container = null;
-    let anchor = null;
+    const adapter = adapterFor(options.site);
+    let rows = null;
+    let locatedAt = 0;
     let observer = null;
     let debounce = null;
     let heartbeat = null;
     let stopped = false;
-    const observe = (el) => {
+    const observe = (root) => {
       observer?.disconnect();
-      observer = new MutationObserver(() => schedule(80));
-      observer.observe(el, { childList: true, subtree: true, characterData: true });
+      if (!root)
+        return;
+      observer = new MutationObserver(() => schedule(60));
+      observer.observe(root, { childList: true, subtree: true, characterData: true });
     };
     const locate = () => {
-      const headers = findHeaders(document);
-      anchor = headers.price ?? headers.total ?? null;
-      if (!anchor)
-        return false;
-      const found = findContainer(anchor, headers.total);
-      if (!found)
-        return false;
-      container = found;
-      observe(found);
-      return true;
+      const found = adapter.locate(document);
+      rows = found && found.length > 0 ? found : null;
+      locatedAt = Date.now();
+      observe(rows ? rootFor(rows) : null);
     };
     const tick = () => {
       if (stopped)
         return;
-      if (!container || !container.isConnected) {
-        container = null;
-        if (!locate())
-          return;
-      }
-      if (!container)
+      const stale = !rows || rows.length === 0 || Date.now() - locatedAt > adapter.cacheMs || rows.some((row) => !row.row.isConnected);
+      if (stale)
+        locate();
+      if (!rows || rows.length === 0)
         return;
       const config = options.getConfig();
-      const triples = collectTriples(container);
-      if (triples.length === 0) {
-        container = null;
-        return;
-      }
-      applyTriples(triples, options.getRate(), config);
+      applyPlan(planRows(rows, options.getRate(), config));
     };
     const schedule = (delay = 120) => {
       if (stopped || debounce !== null)
@@ -739,7 +1106,7 @@ coin:
       }, delay);
     };
     const start = () => {
-      if (!locate()) {}
+      locate();
       tick();
       heartbeat = setInterval(tick, 700);
     };
@@ -750,7 +1117,8 @@ coin:
     }
     return {
       rescan: () => {
-        container = null;
+        rows = null;
+        locatedAt = 0;
         schedule(0);
       },
       stop: () => {
@@ -1128,7 +1496,7 @@ coin:
       const target = event.target.closest("[data-act]");
       if (!target)
         return;
-      const action = target.dataset.act;
+      const action = target.dataset["act"];
       if (action === "deposit")
         window.open(depositUrl(options.site, coin), "_blank", "noopener");
       if (action === "withdraw")
@@ -1136,8 +1504,8 @@ coin:
       if (action === "refresh")
         load(true);
       if (action === "collapse") {
-        const collapsed = panel.dataset.collapsed !== "true";
-        panel.dataset.collapsed = String(collapsed);
+        const collapsed = panel.dataset["collapsed"] !== "true";
+        panel.dataset["collapsed"] = String(collapsed);
         target.textContent = collapsed ? "+" : "−";
         setStored(COLLAPSE_KEY, collapsed);
       }
@@ -1180,7 +1548,7 @@ coin:
       document.body.appendChild(host);
       applyPosition();
       if (getStored(COLLAPSE_KEY, false)) {
-        panel.dataset.collapsed = "true";
+        panel.dataset["collapsed"] = "true";
         $('[data-act="collapse"]').textContent = "+";
       }
       syncPair();
@@ -1233,7 +1601,8 @@ coin:
       volumeMode: asMode(str("idr.volumeFormat", "full"), "full"),
       prefix: str("idr.prefix", ""),
       priceColor: str("idr.priceColor", "#ead05a"),
-      volumeColor: str("idr.volumeColor", "")
+      volumeColor: str("idr.volumeColor", ""),
+      fit: bool("idr.fit", true)
     };
     cachedOrderbookConfigAt = now;
     return cachedOrderbookConfig;
@@ -1286,9 +1655,9 @@ coin:
   async function boot() {
     const site = detectSite();
     initRate();
-    const orderbook = startOrderbook({ getRate: rateValue, getConfig: orderbookConfig });
+    const orderbook = startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
     globalThis.TradeCat = {
-      describe: describeOrderbook,
+      describe: () => describeOrderbook(site),
       rescan: () => orderbook.rescan(),
       rate: () => rateValue(),
       setRate: (value) => saveRate(value, "manual")
@@ -1324,10 +1693,10 @@ coin:
         orderbook.rescan();
       },
       debug: () => {
-        const info = describeOrderbook();
+        const info = describeOrderbook(site);
         log("orderbook debug", info);
         if (typeof GM_notification === "function") {
-          GM_notification({ title: "TradeCat", text: `${info.rows} rows · header: ${info.header ?? "not found"}` });
+          GM_notification({ title: "TradeCat", text: `${info.rows} rows · adapter: ${info.adapter}` });
         }
       }
     });

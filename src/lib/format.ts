@@ -6,6 +6,7 @@
  *
  *   78,048.9        78.048,9        1.234            (decimal)
  *   0.000380        0.000000123     0,000380         (tiny amounts / prices)
+ *   0.0{4}1234      0.0₄123                         (collapsed tiny prices: gate and friends)
  *   266.38K         2.34K           1.2M   3B   4T  (suffixes)
  *   12.5万          3.2亿                            (CJK suffixes)
  *   <0.00000001     ≈ $77,936.15    -12.34           (noise)
@@ -25,6 +26,31 @@ const UNIT: Record<string, number> = {
 };
 
 const SEP_SPACE = /[\s\u00a0\u202f\u2009\u2007\u2008]/g;
+
+const SUBSCRIPT_DIGITS: Record<string, string> = {
+  '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
+  '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+};
+
+/**
+ * Expand the "collapsed" notation exchanges use for sub-cent prices:
+ *
+ *   0.0{4}1234  ->  0.00001234
+ *   0.0₄123     ->  0.0000123
+ *
+ * The marker counts the zeros after the decimal point; one zero is already
+ * present in front of it, hence `n - 1`.
+ */
+function expandCollapsed(input: string): string {
+  return input.replace(/\{(\d{1,3})\}|([₀-₉]+)/g, (match, braces?: string, subs?: string) => {
+    const subscript = subs
+      ? Number([...subs].map((char) => SUBSCRIPT_DIGITS[char] ?? '').join(''))
+      : NaN;
+    const count = braces ? Number(braces) : subscript;
+    if (!Number.isFinite(count) || count < 1) return match;
+    return '0'.repeat(Math.min(24, count - 1));
+  });
+}
 
 export interface ParsedNumber {
   value: number;
@@ -46,21 +72,26 @@ export function parseNumberInfo(input: string | number | null | undefined): Pars
   // Drop whitespace and everything that is not a digit / separator / letter /
   // CJK unit.
   let s = String(input).replace(SEP_SPACE, '');
-  s = s.replace(/[^0-9.,+\-A-Za-z万亿]/g, '');
+  s = s.replace(/[^0-9.,+\-A-Za-z万亿{}₀-₉]/g, '');
   if (!s) return null;
+
+  if (s.includes('.') && (s.includes('{') || /[₀-₉]/.test(s))) {
+    s = expandCollapsed(s);
+  }
 
   let mult = 1;
   // A unit suffix must directly follow a digit or separator - otherwise
   // "78,048.90 USDT" would be read as 78,048.90 * 1e12 ("T" for tera).
   const unitMatch = s.match(/([0-9.,])([kKmMbBtT万亿])$/);
-  if (unitMatch) {
-    const key = unitMatch[2];
-    mult = UNIT[key.toLowerCase()] ?? UNIT[key] ?? 1;
+  const unitKey = unitMatch?.[2];
+  if (unitKey) {
+    mult = UNIT[unitKey.toLowerCase()] ?? UNIT[unitKey] ?? 1;
     s = s.slice(0, -1);
   }
 
-  // Drop leftover letters (currency codes such as USDT / BTC).
-  s = s.replace(/[A-Za-z万亿]/g, '');
+  // Drop leftover letters (currency codes such as USDT / BTC) and any stray
+  // collapsed-notation markers that had no digits to attach to.
+  s = s.replace(/[A-Za-z万亿{}₀-₉]/g, '');
 
   const negative = /^-/.test(s);
   s = s.replace(/[+\-]/g, '');
@@ -84,7 +115,7 @@ export function parseNumberInfo(input: string | number | null | undefined): Pars
     // use US formatting for prices). "1.234" therefore means 1.234, not 1234.
     norm = s;
   } else if (commas === 1) {
-    const [intPart, fracPart] = s.split(',');
+    const [intPart = '', fracPart = ''] = s.split(',');
     const looksLikeThousands = intPart !== '0' && /^\d{1,3}$/.test(intPart) && fracPart.length === 3;
     norm = looksLikeThousands ? intPart + fracPart : s.replace(',', '.');
   } else {
@@ -94,7 +125,7 @@ export function parseNumberInfo(input: string | number | null | undefined): Pars
   const n = Number(norm);
   if (!Number.isFinite(n)) return null;
 
-  const decimals = norm.includes('.') ? norm.split('.')[1].length : 0;
+  const decimals = norm.includes('.') ? (norm.split('.')[1] ?? '').length : 0;
   const step = Math.pow(10, -decimals) * mult;
 
   return { value: negative ? -n * mult : n * mult, step };

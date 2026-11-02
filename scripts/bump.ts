@@ -8,8 +8,6 @@
  * compares the version in the *remote* file's metadata block, so dist/ must be
  * rebuilt (and pushed) after bumping.
  */
-declare const Bun: any;
-
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 

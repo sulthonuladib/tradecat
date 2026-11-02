@@ -36,7 +36,8 @@ export const RATE_SOURCES: RateSource[] = [
   {
     id: 'indodax',
     label: 'Indodax USDT/IDR',
-    url: 'https://indodax.com/api/ticker/usdt_idr',
+    // Canonical endpoint; `ticker.last` is the latest traded USDT/IDR price.
+    url: 'https://indodax.com/api/ticker/usdtidr',
     parse: (body) => numberOrNull(body?.ticker?.last),
   },
   {

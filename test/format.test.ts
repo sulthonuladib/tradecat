@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { formatIdr, parseNumber } from '../src/lib/format';
 
 describe('parseNumber', () => {
-  const cases: Array<[string, number | null]> = [
+  const cases: Array<[string | null | undefined, number | null]> = [
     // gate.io style
     ['78,048.9', 78048.9],
     ['0.000380', 0.00038],
@@ -17,6 +17,10 @@ describe('parseNumber', () => {
     ['21,605.26', 21605.26],
     // tiny prices
     ['0.000000123', 0.000000123],
+    // collapsed tiny prices (gate braces, unicode subscripts)
+    ['0.0{4}1234', 0.00001234],
+    ['0.0₄123', 0.0000123],
+    ['0.0{7}1', 0.00000001],
     ['0.0000000123', 0.0000000123],
     ['<0.00000001', 0.00000001],
     // locale variants
@@ -49,7 +53,7 @@ describe('parseNumber', () => {
 
   for (const [input, expected] of cases) {
     test(`${JSON.stringify(input)} -> ${expected}`, () => {
-      const actual = parseNumber(input as any);
+      const actual = parseNumber(input);
       if (expected === null) {
         expect(actual).toBeNull();
       } else {

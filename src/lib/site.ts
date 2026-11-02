@@ -18,8 +18,10 @@ export interface Pair {
 /** BTC_USDT / BTC-USDT from /trade/... or /exchange/... */
 export function currentPair(path: string = location.pathname): Pair | null {
   const match = path.match(/\/(?:trade|exchange|spot)\/([A-Za-z0-9]{1,12})[_-]([A-Za-z0-9]{1,12})/);
-  if (!match) return null;
-  return { base: match[1].toUpperCase(), quote: match[2].toUpperCase() };
+  const base = match?.[1];
+  const quote = match?.[2];
+  if (!base || !quote) return null;
+  return { base: base.toUpperCase(), quote: quote.toUpperCase() };
 }
 
 export function depositUrl(site: SiteId, coin: string): string {

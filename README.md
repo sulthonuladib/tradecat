@@ -28,7 +28,7 @@ Full walkthrough: **[INSTALL.md](INSTALL.md)** — short version:
    | Script | Install link | Purpose |
    | --- | --- | --- |
    | `TradeCat · IDR Orderbook` | [dist/tradecat-idr.user.js](https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js) | the main script |
-   | `TradeCat · USDT/IDR Rate Updater` | [dist/tradecat-rate-updater.user.js](https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js) | keeps the rate fresh (background + crontab, every 2h) |
+   | `TradeCat · USDT/IDR Rate Updater` | [dist/tradecat-rate-updater.user.js](https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js) | keeps the rate fresh (background + crontab, every 15 min) |
 
    The scripts carry `@updateURL`/`@downloadURL`, so ScriptCat will offer updates
    when `dist/` changes on `main`.
@@ -56,6 +56,7 @@ command):
 | `idr.prefix` | `` (empty) | set to `Rp` if you want `Rp1.407.000.000` |
 | `idr.priceColor` | `#ead05a` | colour of the IDR price badge (empty = inherit the row's red/green) |
 | `idr.volumeColor` | *(empty)* | colour of the converted Total column (empty = inherit) |
+| `idr.fit` | `true` | degrade to compact (`1,44 M`) instead of clipping when the cell is too narrow |
 | `idr.showPrice` | `true` | show IDR next to the price |
 | `idr.convertTotal` | `true` | replace `Total (USDT)` with IDR volume |
 | `idr.ttlHours` | `6` | how long a cached rate counts as fresh |
@@ -85,7 +86,7 @@ Order of resolution:
 
 1. fresh value from storage (`idr.rate` + `idr.updatedAt`, TTL = `idr.ttlHours`)
 2. optional network sources (`RATE_SOURCES` in `src/lib/rate.ts`:
-   Indodax → CoinGecko) — only when `idr.enableNetworkRate` is on
+   Indodax `usdtidr` → CoinGecko) — only when `idr.enableNetworkRate` is on
 3. stale stored value
 4. `idr.fallbackRate` / `DEFAULT_USDT_IDR`
 
@@ -113,38 +114,52 @@ re-renders the orderbook — no page reload needed.
 
 ## How the orderbook detection works
 
-Exchange DOM changes constantly, so the engine (`src/lib/orderbook.ts`) never
-looks at class names:
+Locating rows is per exchange (`src/lib/exchanges/`); rendering, rate changes and
+re-renders are handled once by the engine (`src/lib/orderbook.ts`):
 
-1. find the `Price (USDT)` header (matched on **text nodes**, so sort arrows and
-   icons next to it do not matter),
-2. climb the ancestors until an element contains at least two rows,
-3. inside that element, find numeric leaves (short text nodes) where
+| Adapter | Anchor |
+| --- | --- |
+| gate | gate hints first (`#market-list…`, `*entrust*`, `*trade-grid*`, `*orderbook*`), then structure |
+| mexc | `*orderbookItem*` rows, then `*asks*` / `*bids*` boxes, then structure |
+| generic | structure only |
 
-   ```
-   price * amount ≈ total     (tolerance = 2%, or the display rounding step)
-   ```
+The structural rule needs no class names:
 
-4. append a `span.tc-idr-price` after the price leaf and write the IDR value
-   into the total leaf.
+1. a row is a child of a repeated sibling group, and each row holds 2-8 visible
+   numbers,
+2. `price × amount ≈ total` holds for one ordered triple in that row
+   (tolerance = 2%, or the display rounding step),
+3. at least two children of the parent agree on the same column layout, and at
+   least 60% of the parent's children are row-like.
 
-The `price * amount ≈ total` rule is what keeps it from touching the
-open-orders table, trade history or the buy/sell ratio bar. Tolerance is derived
-from the displayed precision, which is why fee columns and `1.51K` style totals
-cannot be matched by accident.
+The product check keeps the open-orders table, trade history and the buy/sell
+ratio bar out. Row-density and row-containment checks stop a two-row side panel
+from being mistaken for a two-row table. Rows with an extra numeric column
+(change %, fee) still map correctly because the tightest column span wins and
+the mapping has to agree across the whole list.
+
+Only the price cell is ever annotated: a `span.tc-idr-price` is appended inside
+it, and the total leaf's text is replaced. When the configured format does not
+fit the cell (MEXC's price column is ~82 px), the badge degrades to compact
+(`1,44 M`) and then to a tight `1,44M` at a smaller size; the full value always
+stays in the `title` tooltip. `idr.fit` turns that behaviour off.
 
 It re-applies on a 700 ms heartbeat plus a throttled `MutationObserver`, so live
-price flashes, SPA re-renders and pair switches keep working.
+price flashes, SPA re-renders and pair switches keep working. Cheap locators
+(MEXC selectors) refresh every tick; structural scans are throttled to ~1.2 s.
+
+Sub-cent prices written in collapsed notation (`0.0{4}1234`, `0.0₄123`) are
+expanded before conversion, which gate uses for coins like SHIB.
 
 **If a row stops converting**, run `TradeCat.describe()` in the console:
 
 ```json
-{ "header": "Price (USDT)", "container": "div.ob", "rows": 40, "sample": [...] }
+{ "adapter": "mexc", "rows": 40, "sample": ["77,651.82 × 0.00125724 = 97.60"] }
 ```
 
-`rows: 0` means the layout changed in a way the rule does not recognise — in that
-case copy one orderbook row element (DevTools → right click the row → *Copy →
-Copy element*) and the rule can be extended.
+`rows: 0` means the layout changed in a way the rule does not recognise — copy
+one orderbook row element (DevTools → right click the row → *Copy → Copy
+element*) and the adapter can be taught the new shape.
 
 ---
 
@@ -183,12 +198,19 @@ Notes:
 ## Development
 
 ```bash
+bun install        # TypeScript + Bun types (dev only)
 bun run build      # bundle src/ → dist/*.user.js (metadata block is prepended)
 bun run watch      # rebuild on change
 bun test           # unit tests (parsing / formatting)
 bun run test:dom   # headless Chromium end-to-end tests against fixtures
-bun run check      # tsc --noEmit
+bun run check      # tsc: src project + tooling project, both strict
 ```
+
+Two TypeScript projects: `tsconfig.json` compiles the userscript sources against
+`DOM` only (no Bun/Node globals can leak in), `tsconfig.tools.json` compiles
+`build.ts`, `scripts/` and the tests with Bun types. `tsconfig.base.json` holds
+the shared strict flags (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
+`verbatimModuleSyntax`, unused-locals errors, …).
 
 Layout:
 
@@ -200,7 +222,10 @@ src/
   lib/format.ts           parse/format exchange numbers (incl. tiny prices)
   lib/rate.ts             rate promise + shared storage contract
   lib/store.ts            GM storage / localStorage / GM_xmlhttpRequest
-  lib/orderbook.ts        layout agnostic orderbook engine
+  lib/orderbook.ts        engine: render, fit, heartbeat, observers, debug
+  lib/detect.ts           structural row detection (price × amount ≈ total)
+  lib/dom.ts              injected-text filtering, leaf walking, cell lookup
+  lib/exchanges/          gate / mexc / generic row locators
   lib/coininfo.ts         deposit/withdraw per coin + chain
   lib/panel.ts            shadow-DOM panel (chains + Deposit/Withdraw buttons)
   lib/site.ts             site detection, pair parsing, deposit/withdraw URLs

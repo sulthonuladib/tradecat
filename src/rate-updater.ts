@@ -1,7 +1,7 @@
 /**
  * TradeCat · USDT/IDR rate updater.
  *
- * Runs as a ScriptCat background + crontab script (every 2 hours) and writes
+ * Runs as a ScriptCat background + crontab script (every 15 minutes) and writes
  * the rate into shared storage (`@storageName tradecat`) where the orderbook
  * script reads it. Sources are tried in order; the first success wins.
  */
@@ -34,6 +34,6 @@ async function refresh(): Promise<number | null> {
 
   if (!isBackground) {
     // Also usable as a normal script: refresh while the tab is open.
-    setInterval(() => void refresh(), 30 * 60 * 1000);
+    setInterval(() => void refresh(), 15 * 60 * 1000);
   }
 })();

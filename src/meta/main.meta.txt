@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.2.0
+// @version      0.3.0
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       tradecat
 // @license      MIT
@@ -67,6 +67,11 @@ idr:
     description: Colour of the converted Total column. Leave empty to inherit the cell colour.
     type: text
     default: ""
+  fit:
+    title: Shrink numbers that do not fit
+    description: When the full IDR number is wider than the orderbook cell, switch to compact (1,44 M) instead of letting it get clipped. The full value stays in the tooltip.
+    type: checkbox
+    default: true
   showPrice:
     title: Show IDR next to the orderbook price
     type: checkbox

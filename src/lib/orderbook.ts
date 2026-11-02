@@ -1,25 +1,25 @@
 /**
- * Generic orderbook converter.
+ * Orderbook converter engine.
  *
- * Gate and MEXC (and most other exchanges) render the orderbook differently and
- * change their class names on every deploy, so nothing here depends on class
- * names. Instead we:
+ * Locating rows is delegated to a per-exchange adapter (see `./exchanges`).
+ * This module owns everything else:
  *
- *   1. find the "Price (USDT)" column header,
- *   2. walk up until we find the element that actually contains the rows,
- *   3. inside that element look for numeric leaves where
+ *   - re-locating when the exchange re-renders (SPA route changes, payload
+ *     swaps, virtualised scrolling) and throttling the expensive scans,
+ *   - appending the IDR price badge next to every price,
+ *   - replacing the Total (USDT) cell with its IDR value,
+ *   - keeping all of that stable under React-style re-renders.
  *
- *          price * amount ≈ total        (within 2%)
- *
- *      which is exactly what an orderbook row is. That triple check is what
- *      makes the whole thing layout agnostic and safe (it will not touch the
- *      open-orders table, the trade history, or the B/S ratio bar).
- *
- * Then we append an IDR badge after the price and swap the total for its IDR
- * value. Everything is re-applied on a heartbeat + mutation observer, so SPA
- * re-renders, live price flashes and pair switches all keep working.
+ * Layout safety: a badge is never wider than the price cell. When the configured
+ * format does not fit, the badge degrades to compact (`1,44 M`) and then to a
+ * tight compact (`1,44M`, smaller font). A `title` always carries the full IDR
+ * value, and the volume column does the same (compact when full would clip).
  */
-import { formatIdr, parseNumber, parseNumberInfo, type IdrMode } from './format';
+import { cleanText, INJECTED, markRendered, PRICE_IDR, siteText } from './dom';
+import type { OrderRow } from './detect';
+import { adapterFor, type ExchangeAdapter } from './exchanges';
+import { formatIdr, parseNumber, type IdrMode } from './format';
+import type { SiteId } from './site';
 
 export interface OrderbookConfig {
   showPrice: boolean;
@@ -31,34 +31,14 @@ export interface OrderbookConfig {
   priceColor: string;
   /** Colour for the IDR volume. Empty = inherit the cell colour. */
   volumeColor: string;
+  /** Degrade to compact / smaller text when the full number would be clipped. */
+  fit: boolean;
 }
 
 export interface OrderbookHandle {
   rescan(): void;
   stop(): void;
 }
-
-interface Triple {
-  row: HTMLElement;
-  price: HTMLElement;
-  amount: HTMLElement;
-  total: HTMLElement;
-}
-
-const INJECTED = 'tc-injected';
-const PRICE_IDR = 'tc-idr-price';
-
-const PRICE_IDR_BASE_STYLE = [
-  'margin-left:6px',
-  'font-size:0.82em',
-  'font-weight:400',
-  'line-height:1',
-  'white-space:nowrap',
-  'letter-spacing:0',
-  'display:inline-block',
-  'vertical-align:baseline',
-  'pointer-events:none',
-];
 
 const COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]{3,24}|rgba?\([\d.,%\s/]+\)|hsla?\([\d.,%\s/]+\))$/i;
 
@@ -69,324 +49,318 @@ function sanitizeColor(value: string | null | undefined): string {
   return COLOR_RE.test(candidate) ? candidate : '';
 }
 
-function priceBadgeStyle(config: OrderbookConfig): string {
+const PRICE_IDR_BASE_STYLE = [
+  'font-weight:400',
+  'line-height:1',
+  'white-space:nowrap',
+  'letter-spacing:0',
+  'display:inline-block',
+  'vertical-align:baseline',
+  'pointer-events:none',
+  'user-select:none',
+  'font-variant-numeric:tabular-nums',
+];
+
+function priceBadgeStyle(config: OrderbookConfig, fontSizeEm: number, gapPx: number): string {
   const color = sanitizeColor(config.priceColor);
-  return [...PRICE_IDR_BASE_STYLE, color ? `color:${color}` : 'color:inherit', color ? 'opacity:1' : 'opacity:0.72'].join(';');
+  return [
+    ...PRICE_IDR_BASE_STYLE,
+    `margin-left:${gapPx}px`,
+    `font-size:${fontSizeEm}em`,
+    `color:${color || 'inherit'}`,
+    `opacity:${color ? '1' : '0.72'}`,
+  ].join(';');
 }
 
-/** last text we wrote into an element, so we can still read the site's value */
-const rendered = new WeakMap<HTMLElement, string>();
+function ensureBadge(cell: HTMLElement): HTMLElement {
+  let badge = cell.querySelector<HTMLElement>(':scope > .' + PRICE_IDR);
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = `${INJECTED} ${PRICE_IDR}`;
+    badge.setAttribute('aria-hidden', 'true');
+    cell.appendChild(badge);
+  }
+  return badge;
+}
 
-/** textContent, but ignoring anything this script injected. */
-function cleanText(el: Element): string {
-  const raw = el.textContent;
-  if (!raw) return '';
-  if (!el.querySelector('.' + INJECTED)) return raw.trim();
+// --- text measurement ----------------------------------------------------
+//
+// Deciding whether the full IDR number fits must not force a layout on every
+// price tick, so widths come from a canvas plus one cached `clientWidth` read
+// per cell. The width is pinned for the current layout and only re-read after a
+// window resize, so the badge can never grow its own budget.
 
-  let out = '';
-  const visit = (node: Node): void => {
-    node.childNodes.forEach((child) => {
-      if (child.nodeType === Node.TEXT_NODE) {
-        out += child.textContent ?? '';
-      } else if (child.nodeType === Node.ELEMENT_NODE) {
-        const childEl = child as Element;
-        if (!childEl.classList.contains(INJECTED)) visit(childEl);
-      }
-    });
+interface CellMetrics {
+  contentWidth: number;
+  fontPx: number;
+  weight: string;
+  family: string;
+  epoch: number;
+}
+
+const metricsCache = new WeakMap<HTMLElement, CellMetrics>();
+
+// A cell's width is captured *before* the badge exists and then kept for the
+// current layout. Re-measuring after insertion would let the badge enlarge its
+// own budget and squeeze the amount columns of a flex row.
+let widthEpoch = 0;
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'resize',
+    () => {
+      widthEpoch += 1;
+    },
+    { passive: true },
+  );
+}
+let canvasCtx: CanvasRenderingContext2D | null | undefined;
+
+function measureText(text: string, font: string): number {
+  if (!text) return 0;
+  if (canvasCtx === undefined) {
+    try {
+      canvasCtx = document.createElement('canvas').getContext('2d');
+    } catch {
+      canvasCtx = null;
+    }
+  }
+  if (!canvasCtx) return text.length * 7;
+  canvasCtx.font = font;
+  return canvasCtx.measureText(text).width;
+}
+
+function metricsFor(cell: HTMLElement): CellMetrics | null {
+  const cached = metricsCache.get(cell);
+  if (cached && cached.epoch === widthEpoch) return cached;
+
+  let style: CSSStyleDeclaration;
+  try {
+    style = getComputedStyle(cell);
+  } catch {
+    return null;
+  }
+
+  const fontPx = parseFloat(style.fontSize) || 12;
+  const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+  const contentWidth = cell.clientWidth - padding;
+  if (!(contentWidth > 0)) return null;
+
+  const metrics: CellMetrics = {
+    contentWidth,
+    fontPx,
+    weight: style.fontWeight || '400',
+    family: style.fontFamily || 'sans-serif',
+    epoch: widthEpoch,
   };
-  visit(el);
-  return out.trim();
+  metricsCache.set(cell, metrics);
+  return metrics;
 }
 
-/** The value the exchange itself put in this element (not our conversion). */
-function siteText(el: HTMLElement): string {
-  const current = cleanText(el);
-  const previous = rendered.get(el);
-  if (previous !== undefined && previous === current) {
-    const original = el.dataset.tcOrig;
-    if (original !== undefined) return original;
-  }
-  return current;
+interface TextChoice {
+  text: string;
+  fontEm: number;
+  gapPx: number;
 }
 
-const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'CANVAS', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'svg', 'path']);
+/**
+ * Full IDR, compact IDR or tight compact - whichever fits the cell. Narrow
+ * exchange columns (MEXC's price cell is ~82px) can need the smallest tier.
+ */
+function choosePriceText(
+  full: string,
+  compact: string,
+  priceText: string,
+  metrics: CellMetrics | null,
+  fit: boolean,
+): TextChoice {
+  const regular: TextChoice = { text: full, fontEm: 0.82, gapPx: 6 };
+  if (!fit || !metrics) return regular;
 
-/** Collect elements that directly hold a short piece of text. */
-function walkLeaves(root: Element, out: HTMLElement[], maxLeaves = 1200, maxNodes = 20000): void {
-  let visited = 0;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
-    acceptNode(node: Node): number {
-      const el = node as HTMLElement;
-      visited += 1;
-      if (visited > maxNodes || out.length >= maxLeaves) return NodeFilter.FILTER_REJECT;
-      if (SKIP_TAGS.has(el.tagName)) return NodeFilter.FILTER_REJECT;
-      if (el.classList && el.classList.contains(INJECTED)) return NodeFilter.FILTER_REJECT;
+  const font = (em: number): string =>
+    `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
+  const base = measureText(priceText, font(1));
+  const tight = compact.replace(/\s+/g, '');
+  const fits = (text: string, em: number, gap: number): boolean =>
+    base + gap + measureText(text, font(em)) <= metrics.contentWidth + 0.5;
 
-      const kids = el.children;
-      let hasRealChild = false;
-      for (let index = 0; index < kids.length; index += 1) {
-        if (!kids[index].classList.contains(INJECTED)) {
-          hasRealChild = true;
-          break;
-        }
-      }
-      if (hasRealChild) return NodeFilter.FILTER_SKIP;
+  if (fits(regular.text, regular.fontEm, regular.gapPx)) return regular;
 
-      const text = cleanText(el);
-      if (!text || text.length > 24) return NodeFilter.FILTER_REJECT;
+  const compactChoice: TextChoice = { text: compact, fontEm: 0.82, gapPx: 6 };
+  if (fits(compactChoice.text, compactChoice.fontEm, compactChoice.gapPx)) return compactChoice;
 
-      out.push(el);
-      return NodeFilter.FILTER_REJECT;
-    },
-  } as any);
+  const tightChoice: TextChoice = { text: tight, fontEm: 0.68, gapPx: 4 };
+  if (fits(tightChoice.text, tightChoice.fontEm, tightChoice.gapPx)) return tightChoice;
 
-  walker.nextNode();
+  return { text: tight, fontEm: 0.62, gapPx: 2 };
 }
 
-function lowestCommonAncestor(a: Node, b: Node): Node | null {
-  const ancestors = new Set<Node>();
-  for (let node: Node | null = a; node; node = node.parentNode) ancestors.add(node);
-  for (let node: Node | null = b; node; node = node.parentNode) {
-    if (ancestors.has(node)) return node;
-  }
-  return null;
+/** Should the full IDR volume be replaced by compact text? */
+function chooseVolumeText(full: string, compact: string, metrics: CellMetrics | null, fit: boolean): string {
+  if (!fit || !metrics) return full;
+  const font = `${metrics.weight} ${metrics.fontPx}px ${metrics.family}`;
+  return measureText(full, font) <= metrics.contentWidth + 0.5 ? full : compact;
 }
 
-function numericLeavesIn(row: HTMLElement, leaves: HTMLElement[], parsed: Array<{ value: number } | null>): number {
-  let count = 0;
-  for (let index = 0; index < leaves.length; index += 1) {
-    if (parsed[index] == null) continue;
-    if (row.contains(leaves[index])) {
-      count += 1;
-      if (count > 8) break;
-    }
-  }
-  return count;
+// --- rendering -----------------------------------------------------------
+
+interface PriceWrite {
+  cell: HTMLElement;
+  text: string;
+  full: string;
+  style: string;
 }
 
-/** Find price/amount/total triples inside `root`. */
-function collectTriples(root: HTMLElement): Triple[] {
-  const leaves: HTMLElement[] = [];
-  walkLeaves(root, leaves);
-  if (leaves.length < 3) return [];
-
-  const parsed = leaves.map((el) => parseNumberInfo(siteText(el)));
-  const triples: Triple[] = [];
-  const seen = new Set<HTMLElement>();
-
-  let i = 0;
-  while (i < leaves.length) {
-    const priceInfo = parsed[i];
-    if (!priceInfo || priceInfo.value <= 0) {
-      i += 1;
-      continue;
-    }
-    const price = priceInfo.value;
-
-    let matched = false;
-    const maxJ = Math.min(i + 5, leaves.length);
-    for (let j = i + 1; j < maxJ && !matched; j += 1) {
-      const amountInfo = parsed[j];
-      if (!amountInfo || amountInfo.value <= 0) continue;
-      const amount = amountInfo.value;
-      const maxK = Math.min(j + 5, leaves.length);
-      for (let k = j + 1; k < maxK; k += 1) {
-        const totalInfo = parsed[k];
-        if (!totalInfo || totalInfo.value <= 0) continue;
-        const total = totalInfo.value;
-
-        // Tolerance has to cover display rounding of both amount and total,
-        // otherwise a tiny price can "match" the fee column by accident.
-        const tolerance =
-          Math.max(total * 0.02, totalInfo.step * 1.05, price * amountInfo.step * 1.05) + 1e-12;
-        if (Math.abs(price * amount - total) > tolerance) continue;
-
-        const rowNode = lowestCommonAncestor(leaves[i], lowestCommonAncestor(leaves[j], leaves[k]) ?? leaves[k]);
-        if (!rowNode || !(rowNode instanceof HTMLElement) || rowNode === root || !root.contains(rowNode)) continue;
-
-        const numeric = numericLeavesIn(rowNode, leaves, parsed);
-        if (numeric < 3 || numeric > 8) continue;
-        if (seen.has(rowNode)) continue;
-
-        seen.add(rowNode);
-        triples.push({ row: rowNode, price: leaves[i], amount: leaves[j], total: leaves[k] });
-        i = k + 1;
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) i += 1;
-  }
-
-  return triples;
+interface VolumeWrite {
+  target: HTMLElement;
+  text: string;
+  original: string;
+  color: string;
 }
 
-function headerKey(text: string): string {
-  return text.toLowerCase().replace(/[^a-z]/g, '');
-}
-
-const PRICE_HEADER_KEYS = new Set(['priceusdt', 'pricetusdt', 'priceusdtprice']);
-const TOTAL_HEADER_KEYS = new Set(['totalusdt', 'totaltusdt']);
-
-function isPriceHeader(text: string): boolean {
-  return PRICE_HEADER_KEYS.has(headerKey(text));
-}
-
-function isTotalHeader(text: string): boolean {
-  return TOTAL_HEADER_KEYS.has(headerKey(text));
-}
-
-/** Find the "Price (USDT)" / "Total (USDT)" header cells. */
-function findHeaders(doc: Document): { price?: HTMLElement; total?: HTMLElement } {
-  const result: { price?: HTMLElement; total?: HTMLElement } = {};
-  const body = doc.body;
-  if (!body) return result;
-
-  // Walk text nodes: headers often live next to a sort arrow or an icon, so
-  // matching on element textContent alone is not reliable.
-  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
-    acceptNode(node: Node): number {
-      const raw = (node.nodeValue || '').trim();
-      if (!raw || raw.length > 24) return NodeFilter.FILTER_REJECT;
-      const parent = (node as Text).parentElement;
-      if (!parent || SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-
-      // Text nodes can be split ("Price " + "(USDT)"); use the whole element
-      // text when the element has no element children of its own.
-      const text = parent.children.length === 0 ? (parent.textContent || '').trim() : raw;
-      if (isPriceHeader(text)) {
-        if (!result.price) result.price = parent;
-      } else if (isTotalHeader(text)) {
-        if (!result.total) result.total = parent;
-      }
-      return NodeFilter.FILTER_REJECT;
-    },
-  } as any);
-
-  walker.nextNode();
-  return result;
-}
-
-function findContainer(anchor: HTMLElement, totalHeader?: HTMLElement): HTMLElement | null {
-  let fallback: HTMLElement | null = null;
-  let node: HTMLElement | null = anchor;
-  for (let depth = 0; node && depth < 14; depth += 1, node = node.parentElement) {
-    const triples = collectTriples(node);
-    if (triples.length >= 2) return node;
-    // A collapsed orderbook can show a single row; accept that only when the
-    // container also holds the Total header, to stay on the safe side.
-    if (!fallback && triples.length === 1 && totalHeader && node.contains(totalHeader)) fallback = node;
-  }
-  return fallback;
-}
-
-function cellOf(leaf: HTMLElement, row: HTMLElement): HTMLElement {
-  let node: HTMLElement = leaf;
-  while (node.parentElement && node.parentElement !== row) node = node.parentElement;
-  return node;
-}
-
-function applyTriples(triples: Triple[], rate: number, config: OrderbookConfig): void {
-  const badgeStyle = priceBadgeStyle(config);
+function planRows(
+  rows: OrderRow[],
+  rate: number,
+  config: OrderbookConfig,
+): { prices: PriceWrite[]; volumes: VolumeWrite[] } {
+  const prices: PriceWrite[] = [];
+  const volumes: VolumeWrite[] = [];
   const volumeColor = sanitizeColor(config.volumeColor);
 
-  for (const triple of triples) {
-    if (config.showPrice) {
-      const price = parseNumber(siteText(triple.price));
-      if (price != null && price > 0) {
-        const text = formatIdr(price * rate, { prefix: config.prefix, mode: config.priceMode });
-        const cell = cellOf(triple.price, triple.row);
-        let badge = cell.querySelector<HTMLElement>(':scope > .' + PRICE_IDR);
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = `${INJECTED} ${PRICE_IDR}`;
-          cell.appendChild(badge);
-        }
-        if (badge.dataset.tcStyle !== badgeStyle) {
-          badge.dataset.tcStyle = badgeStyle;
-          badge.setAttribute('style', badgeStyle);
-        }
-        if (badge.textContent !== text) badge.textContent = text;
-      }
+  for (const row of rows) {
+    const priceText = siteText(row.price.el);
+    const price = parseNumber(priceText);
+
+    if (config.showPrice && price != null && price > 0) {
+      const idr = price * rate;
+      const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
+      const compact = formatIdr(idr, { prefix: config.prefix, mode: 'compact' });
+      const metrics = metricsFor(row.priceCell);
+      const choice = choosePriceText(full, compact, priceText, metrics, config.fit);
+      prices.push({
+        cell: row.priceCell,
+        text: choice.text,
+        full,
+        style: priceBadgeStyle(config, choice.fontEm, choice.gapPx),
+      });
     }
 
     if (config.convertTotal) {
-      const target = triple.total;
-      const original = siteText(target);
+      const original = siteText(row.total.el);
       const total = parseNumber(original);
       if (total == null || total <= 0) continue;
 
-      if ((target.dataset.tcVolColor ?? '') !== volumeColor) {
-        target.dataset.tcVolColor = volumeColor;
-        target.style.color = volumeColor;
-      }
-
-      const text = formatIdr(total * rate, { prefix: config.prefix, mode: config.volumeMode });
-      if (cleanText(target) === text) continue;
-      rendered.set(target, text);
-      target.dataset.tcOrig = original;
-      target.textContent = text;
+      const idr = total * rate;
+      const full = formatIdr(idr, { prefix: config.prefix, mode: config.volumeMode });
+      const compact = formatIdr(idr, { prefix: config.prefix, mode: 'compact' });
+      const metrics = metricsFor(row.totalCell);
+      volumes.push({
+        target: row.total.el,
+        text: chooseVolumeText(full, compact, metrics, config.fit),
+        original,
+        color: volumeColor,
+      });
     }
+  }
+
+  return { prices, volumes };
+}
+
+function applyPlan(plan: { prices: PriceWrite[]; volumes: VolumeWrite[] }): void {
+  for (const write of plan.prices) {
+    const badge = ensureBadge(write.cell);
+    if (badge.dataset['tcStyle'] !== write.style) {
+      badge.dataset['tcStyle'] = write.style;
+      badge.setAttribute('style', write.style);
+    }
+    if (badge.textContent !== write.text) badge.textContent = write.text;
+    if (badge.getAttribute('title') !== write.full) badge.setAttribute('title', write.full);
+  }
+
+  for (const write of plan.volumes) {
+    if (write.color) {
+      if (write.target.style.color !== write.color) write.target.style.color = write.color;
+    }
+    if (cleanText(write.target) === write.text) continue;
+    markRendered(write.target, write.text);
+    write.target.dataset['tcOrig'] = write.original;
+    write.target.textContent = write.text;
   }
 }
 
+// --- lifecycle -----------------------------------------------------------
+
+/** Element that covers all rows, used as the mutation-observer root. */
+function rootFor(rows: OrderRow[]): HTMLElement | null {
+  const first = rows[0];
+  if (!first) return null;
+  let node: HTMLElement | null = first.row.parentElement;
+  for (let depth = 0; node && depth < 12; depth += 1, node = node.parentElement) {
+    if (rows.every((row) => node?.contains(row.row))) return node;
+  }
+  return first.row.parentElement;
+}
+
 /** Debug helper: what the engine currently sees. */
-export function describeOrderbook(): { header: string | null; container: string | null; rows: number; sample: string[] } {
-  const headers = findHeaders(document);
-  const anchor = headers.price ?? headers.total ?? null;
-  const container = anchor ? findContainer(anchor, headers.total) : null;
-  const triples = container ? collectTriples(container) : [];
+export function describeOrderbook(site?: SiteId): {
+  adapter: string;
+  rows: number;
+  sample: string[];
+} {
+  const adapter: ExchangeAdapter = adapterFor(site);
+  const rows = adapter.locate(document) ?? [];
   return {
-    header: anchor ? cleanText(anchor) : null,
-    container: container ? `${container.tagName.toLowerCase()}${container.className ? '.' + String(container.className).split(/\s+/).join('.') : ''}` : null,
-    rows: triples.length,
-    sample: triples.slice(0, 3).map((t) => `${siteText(t.price)} × ${siteText(t.amount)} = ${siteText(t.total)}`),
+    adapter: adapter.id,
+    rows: rows.length,
+    sample: rows
+      .slice(0, 3)
+      .map((row) => {
+        const amount = row.amount ? siteText(row.amount.el) : '?';
+        return `${siteText(row.price.el)} × ${amount} = ${siteText(row.total.el)}`;
+      }),
   };
 }
 
 export function startOrderbook(options: {
+  site?: SiteId;
   getRate: () => number;
   getConfig: () => OrderbookConfig;
 }): OrderbookHandle {
-  let container: HTMLElement | null = null;
-  let anchor: HTMLElement | null = null;
+  const adapter = adapterFor(options.site);
+  let rows: OrderRow[] | null = null;
+  let locatedAt = 0;
   let observer: MutationObserver | null = null;
   let debounce: ReturnType<typeof setTimeout> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
 
-  const observe = (el: HTMLElement): void => {
+  const observe = (root: HTMLElement | null): void => {
     observer?.disconnect();
-    observer = new MutationObserver(() => schedule(80));
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    if (!root) return;
+    observer = new MutationObserver(() => schedule(60));
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
   };
 
-  const locate = (): boolean => {
-    const headers = findHeaders(document);
-    anchor = headers.price ?? headers.total ?? null;
-    if (!anchor) return false;
-    const found = findContainer(anchor, headers.total);
-    if (!found) return false;
-    container = found;
-    observe(found);
-    return true;
+  const locate = (): void => {
+    const found = adapter.locate(document);
+    rows = found && found.length > 0 ? found : null;
+    locatedAt = Date.now();
+    observe(rows ? rootFor(rows) : null);
   };
 
   const tick = (): void => {
     if (stopped) return;
-    if (!container || !container.isConnected) {
-      container = null;
-      if (!locate()) return;
-    }
-    if (!container) return;
+
+    const stale =
+      !rows ||
+      rows.length === 0 ||
+      Date.now() - locatedAt > adapter.cacheMs ||
+      rows.some((row) => !row.row.isConnected);
+
+    if (stale) locate();
+    if (!rows || rows.length === 0) return;
+
     const config = options.getConfig();
-    const triples = collectTriples(container);
-    if (triples.length === 0) {
-      // The layout changed under us - look again on the next beat.
-      container = null;
-      return;
-    }
-    applyTriples(triples, options.getRate(), config);
+    applyPlan(planRows(rows, options.getRate(), config));
   };
 
   const schedule = (delay = 120): void => {
@@ -398,9 +372,7 @@ export function startOrderbook(options: {
   };
 
   const start = (): void => {
-    if (!locate()) {
-      // Not rendered yet (SPA hydration) - keep retrying from the heartbeat.
-    }
+    locate();
     tick();
     heartbeat = setInterval(tick, 700);
   };
@@ -413,7 +385,8 @@ export function startOrderbook(options: {
 
   return {
     rescan: () => {
-      container = null;
+      rows = null;
+      locatedAt = 0;
       schedule(0);
     },
     stop: () => {

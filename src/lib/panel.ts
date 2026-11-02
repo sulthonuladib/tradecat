@@ -284,13 +284,13 @@ export function mountPanel(options: { site: SiteId; getConfig: () => PanelConfig
   panel.addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
     if (!target) return;
-    const action = target.dataset.act;
+    const action = target.dataset['act'];
     if (action === 'deposit') window.open(depositUrl(options.site, coin), '_blank', 'noopener');
     if (action === 'withdraw') window.open(withdrawUrl(options.site, coin), '_blank', 'noopener');
     if (action === 'refresh') void load(true);
     if (action === 'collapse') {
-      const collapsed = panel.dataset.collapsed !== 'true';
-      panel.dataset.collapsed = String(collapsed);
+      const collapsed = panel.dataset['collapsed'] !== 'true';
+      panel.dataset['collapsed'] = String(collapsed);
       target.textContent = collapsed ? '+' : '−';
       setStored(COLLAPSE_KEY, collapsed);
     }
@@ -338,7 +338,7 @@ export function mountPanel(options: { site: SiteId; getConfig: () => PanelConfig
     document.body.appendChild(host);
     applyPosition();
     if (getStored<boolean>(COLLAPSE_KEY, false)) {
-      panel.dataset.collapsed = 'true';
+      panel.dataset['collapsed'] = 'true';
       $<HTMLElement>('[data-act="collapse"]').textContent = '+';
     }
     syncPair();

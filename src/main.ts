@@ -48,6 +48,7 @@ function orderbookConfig(): OrderbookConfig {
     prefix: str('idr.prefix', ''),
     priceColor: str('idr.priceColor', '#ead05a'),
     volumeColor: str('idr.volumeColor', ''),
+    fit: bool('idr.fit', true),
   };
   cachedOrderbookConfigAt = now;
   return cachedOrderbookConfig;
@@ -112,11 +113,11 @@ async function boot(): Promise<void> {
   const site = detectSite();
   initRate();
 
-  const orderbook = startOrderbook({ getRate: rateValue, getConfig: orderbookConfig });
+  const orderbook = startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
 
   // Small debug/automation surface, also handy from the DevTools console.
   (globalThis as any).TradeCat = {
-    describe: describeOrderbook,
+    describe: () => describeOrderbook(site),
     rescan: () => orderbook.rescan(),
     rate: () => rateValue(),
     setRate: (value: number) => saveRate(value, 'manual'),
@@ -156,10 +157,10 @@ async function boot(): Promise<void> {
       orderbook.rescan();
     },
     debug: () => {
-      const info = describeOrderbook();
+      const info = describeOrderbook(site);
       log('orderbook debug', info);
       if (typeof GM_notification === 'function') {
-        GM_notification({ title: 'TradeCat', text: `${info.rows} rows · header: ${info.header ?? 'not found'}` });
+        GM_notification({ title: 'TradeCat', text: `${info.rows} rows · adapter: ${info.adapter}` });
       }
     },
   });

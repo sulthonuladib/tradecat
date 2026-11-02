@@ -5,12 +5,12 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js
-// @version      0.2.0
+// @version      0.3.0
 // @description  Periodically refresh the shared USDT → IDR rate (Indodax, then CoinGecko) that the TradeCat orderbook script reads from storage.
 // @author       tradecat
 // @license      MIT
 // @background
-// @crontab      0 */2 * * *
+// @crontab      */15 * * * *
 // @storageName  tradecat
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -104,7 +104,7 @@
     {
       id: "indodax",
       label: "Indodax USDT/IDR",
-      url: "https://indodax.com/api/ticker/usdt_idr",
+      url: "https://indodax.com/api/ticker/usdtidr",
       parse: (body) => numberOrNull(body?.ticker?.last)
     },
     {
@@ -168,7 +168,7 @@
     if (rate === null)
       log("no rate source returned a value - keeping the previous rate");
     if (!isBackground) {
-      setInterval(() => void refresh(), 30 * 60 * 1000);
+      setInterval(() => void refresh(), 15 * 60 * 1000);
     }
   })();
 })();

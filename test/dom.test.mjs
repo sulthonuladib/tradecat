@@ -135,6 +135,34 @@ async function main() {
     expectContains(html, '>12:34:56<', 'market trades time untouched');
   }
 
+  console.log('mexc.fm live markup (orderbookItem rows, trade form labels, virtualised list)');
+  {
+    const html = await dumpDom(`/mexc-live.html?rate=${RATE}&site=mexc`);
+    expectCount(html, 'tc-idr-price', 4, 'one badge per visible row');
+    expectMatch(html, /title="1\.436\.558\.670"/, 'full IDR price is kept in the tooltip');
+    expectMatch(html, /title="1\.424\.500\.000"/, 'live tick updated the tooltip');
+    expectMatch(html, /1,44 ?M/, 'narrow price cell degrades to compact instead of clipping');
+    expectContains(html, '>1.805.600<', 'total 97.60 -> IDR (full)');
+    expectContains(html, '>228,41 jt<', 'total 12,346.64 -> IDR (compact, would clip)');
+    expectContains(html, '>7.122.500<', 'live tick total 385.00 -> IDR');
+    expectContains(html, '>78,036.27<', 'market trades price untouched');
+    expectContains(html, '>12:34:56<', 'market trades time untouched');
+    expectContains(html, 'value="77700"', 'trade form inputs untouched');
+  }
+
+  console.log('gate.com live markup (hashed classes, depth bars, 4 columns, tiny brace price)');
+  {
+    const html = await dumpDom(`/gate-live.html?rate=${RATE}&site=gate`);
+    expectCount(html, 'tc-idr-price', 6, 'one badge per row (asks + bids)');
+    expectMatch(html, /title="1\.436\.560\.150"/, 'ask price tooltip');
+    expectMatch(html, /title="0,22829"/, '0.0{4}1234 parses as 0.00001234');
+    expectContains(html, '>2.873.050<', 'total 155.30 -> IDR');
+    expectContains(html, '>28.675.000<', 'total 1.55K -> IDR');
+    expectContains(html, '>228.290<', 'tiny-price total 12.34 -> IDR');
+    expectContains(html, '>0.12%<', 'extra change column untouched');
+    expectContains(html, '>77,650.10<', 'market trades price untouched');
+  }
+
   console.log('tiny prices (0.000000123) and a 4-column row');
   {
     const html = await dumpDom(`/tiny.html?rate=${RATE}&site=gate`);

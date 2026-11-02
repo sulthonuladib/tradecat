@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mexc.fm live orderbook markup</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var rate = params.get('rate');
+    if (rate) {
+      try {
+        localStorage.setItem('tradecat:idr.rate', JSON.stringify(Number(rate)));
+        localStorage.setItem('tradecat:idr.updatedAt', JSON.stringify(Date.now()));
+        localStorage.setItem('tradecat:idr.source', JSON.stringify('fixture'));
+      } catch (e) {}
+    }
+    window.__TRADECAT_SITE__ = params.get('site') || 'mexc';
+  })();
+</script>
+<style>
+  body { background: #121212; color: #f2f4f6; font: 12px/20px ui-sans-serif, sans-serif; }
+  .ob { width: 223px; }
+  .item { display: flex; position: relative; height: 20px; overflow: hidden; }
+  .p { width: 82.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .v { width: 73.5px; padding-left: 4px; text-align: right; white-space: nowrap; }
+  .a { width: 66.9px; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+  .sell { color: #ff4761; }
+  .buy { color: #0ecb81; }
+  .bar { position: absolute; inset: 0 auto 0 0; background: rgba(255, 71, 97, .12); }
+  form { margin-bottom: 12px; }
+  label { display: block; color: #8b949e; font-size: 11px; }
+  table { border-collapse: collapse; width: 260px; margin-top: 16px; }
+  th, td { text-align: right; padding: 1px 6px; }
+  th { color: #8b949e; font-weight: 400; font-size: 11px; }
+</style>
+</head>
+<body>
+<!-- Trade form: its "Price (USDT)" / "Total (USDT)" labels used to be the
+     anchor the old engine picked up, which is why nothing was converted. -->
+<form>
+  <div><label>Price (USDT)</label><input value="77700" readonly></div>
+  <div><label>Total (USDT)</label><input value="777" readonly></div>
+</form>
+
+<div class="ob">
+  <section class="index-module-scss-module__hVXrWq__asksWrapper scroll-container" style="height:63px">
+    <div class="index-module-scss-module__hVXrWq__asksBox">
+      <div class="index-module-scss-module__hVXrWq__asks">
+        <div style="height:63px;width:100%;position:relative">
+          <div class="index-module-scss-module__hVXrWq__tableRow" style="position:absolute;top:0;left:0;width:100%;height:21px;transform:translateY(0px)">
+            <div class="item index-module-scss-module__hVXrWq__orderbookItem">
+              <div class="bar" style="transform:scaleX(.16)"></div>
+              <div dir="ltr" class="p sell index-module-scss-module__hVXrWq__price">77,651.82</div>
+              <div class="v index-module-scss-module__hVXrWq__vol"><span>0.00125724</span></div>
+              <div class="a index-module-scss-module__hVXrWq__amount"><span>97.60</span></div>
+            </div>
+          </div>
+          <div class="index-module-scss-module__hVXrWq__tableRow" style="position:absolute;top:0;left:0;width:100%;height:21px;transform:translateY(21px)">
+            <div class="item index-module-scss-module__hVXrWq__orderbookItem">
+              <div class="bar" style="transform:scaleX(.31)"></div>
+              <div dir="ltr" class="p sell index-module-scss-module__hVXrWq__price">77,651.80</div>
+              <div class="v index-module-scss-module__hVXrWq__vol"><span>0.15900000</span></div>
+              <div class="a index-module-scss-module__hVXrWq__amount"><span>12,346.64</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="index-module-scss-module__hVXrWq__bidsWrapper scroll-container" style="height:42px">
+    <div class="index-module-scss-module__hVXrWq__bidsBox">
+      <div class="index-module-scss-module__hVXrWq__bids">
+        <div style="height:42px;width:100%;position:relative">
+          <div class="index-module-scss-module__hVXrWq__tableRow" style="position:absolute;top:0;left:0;width:100%;height:21px;transform:translateY(0px)">
+            <div class="item index-module-scss-module__hVXrWq__orderbookItem">
+              <div class="bar" style="transform:scaleX(.5)"></div>
+              <div dir="ltr" class="p buy index-module-scss-module__hVXrWq__price">77,651.60</div>
+              <div class="v index-module-scss-module__hVXrWq__vol"><span>0.00500000</span></div>
+              <div class="a index-module-scss-module__hVXrWq__amount"><span>388.26</span></div>
+            </div>
+          </div>
+          <div class="index-module-scss-module__hVXrWq__tableRow" style="position:absolute;top:0;left:0;width:100%;height:21px;transform:translateY(21px)">
+            <div class="item index-module-scss-module__hVXrWq__orderbookItem">
+              <div class="bar" style="transform:scaleX(.8)"></div>
+              <div dir="ltr" class="p buy index-module-scss-module__hVXrWq__price">77,651.55</div>
+              <div class="v index-module-scss-module__hVXrWq__vol"><span>0.01000000</span></div>
+              <div class="a index-module-scss-module__hVXrWq__amount"><span>776.52</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Market trades: price / amount / time, must stay untouched. -->
+<table class="trades">
+  <thead><tr><th>Price (USDT)</th><th>Amount (BTC)</th><th>Time</th></tr></thead>
+  <tbody>
+    <tr><td><span>78,036.27</span></td><td><span>0.0043</span></td><td><span>12:34:56</span></td></tr>
+    <tr><td><span>78,036.20</span></td><td><span>0.0021</span></td><td><span>12:34:55</span></td></tr>
+  </tbody>
+</table>
+
+<script src="/dist/tradecat-idr.user.js"></script>
+<script>
+  // Live tick: MEXC reuses the same price cell.
+  setTimeout(function () {
+    var bid = document.querySelectorAll('.index-module-scss-module__hVXrWq__bids .index-module-scss-module__hVXrWq__orderbookItem')[0];
+    bid.querySelector('.index-module-scss-module__hVXrWq__price').firstChild.textContent = '77,000.00';
+    bid.querySelector('.index-module-scss-module__hVXrWq__amount span').textContent = '385.00';
+  }, 1500);
+</script>
+</body>
+</html>

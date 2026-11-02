@@ -4,8 +4,6 @@
  *   bun run build          one-shot
  *   bun run build --watch  rebuild on change
  */
-declare const Bun: any;
-
 import { readFileSync, writeFileSync, mkdirSync, watch } from 'node:fs';
 import { join } from 'node:path';
 
@@ -39,7 +37,14 @@ async function buildAll(): Promise<void> {
       continue;
     }
 
-    const code = await result.outputs[0].text();
+    const [artifact] = result.outputs;
+    if (!artifact) {
+      console.error(`build produced no output: ${target.entry}`);
+      process.exitCode = 1;
+      continue;
+    }
+
+    const code = await artifact.text();
     const meta = readFileSync(join(root, target.meta), 'utf8').trimEnd();
     const output = join(root, target.out);
     mkdirSync(join(root, 'dist'), { recursive: true });

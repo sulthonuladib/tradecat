@@ -5,7 +5,7 @@ Two userscripts, one install each. Takes about a minute.
 | Script | What it does | Install link |
 | --- | --- | --- |
 | **TradeCat · IDR Orderbook** | IDR price next to every orderbook price, `Total (USDT)` → IDR volume, deposit/withdraw panel | <https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js> |
-| **TradeCat · USDT/IDR Rate Updater** | keeps the USDT → IDR rate fresh in the background (every 2 hours) | <https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js> |
+| **TradeCat · USDT/IDR Rate Updater** | keeps the USDT → IDR rate fresh in the background (every 15 minutes) | <https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js> |
 
 > Installing only the first script works fine — it falls back to a constant rate
 > (`idr.fallbackRate`, default `18000`) until something writes a real rate.
@@ -93,6 +93,7 @@ ScriptCat dashboard → **Scripts** → `TradeCat · IDR Orderbook` → **Settin
 | `idr.prefix` | *(empty)* | set `Rp` for `Rp1.407.000.000` |
 | `idr.priceColor` | `#ead05a` | colour of the IDR price number (empty = inherit the row's red/green) |
 | `idr.volumeColor` | *(empty)* | colour of the converted Total column (empty = inherit) |
+| `idr.fit` | on | use compact text when the full number would clip |
 | `idr.showPrice` | on | IDR next to the price |
 | `idr.convertTotal` | on | replace `Total (USDT)` with IDR |
 | `idr.ttlHours` | `6` | rate cache lifetime |
@@ -110,8 +111,9 @@ TradeCat.setRate(18085)          // from the DevTools console
 ## 5. The rate updater
 
 `TradeCat · USDT/IDR Rate Updater` runs as a ScriptCat background + crontab
-script: `0 */2 * * *` (every 2 hours), sources tried in order **Indodax →
-CoinGecko**, result written to the shared `tradecat` storage.
+script: `*/15 * * * *` (every 15 minutes). It reads
+<https://indodax.com/api/ticker/usdtidr> (`ticker.last`) first, falls back to
+CoinGecko, and writes the result to the shared `tradecat` storage.
 
 The orderbook script re-reads that storage every 30 seconds, so a fresh rate
 appears without touching the page. You can check it in the panel footer:
