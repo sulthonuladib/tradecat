@@ -4,23 +4,28 @@
  * Locating rows is delegated to a per-exchange adapter (see `./exchanges`).
  * This module owns rendering, rate updates and re-render survival.
  *
- * The IDR price is drawn in an **overlay layer** (`.tc-idr-layer`) anchored to
- * the row list, not injected into the exchange's cells. Exchanges re-render
- * cells constantly (React replaces text nodes and wipes unknown children, MEXC
- * does it on every tick), so anything inside a cell disappears immediately. The
- * reference scripts solved this by absolutely positioning a column of gold
- * numbers; we do the same, but derive the position from the live row geometry
- * instead of hardcoded pixel margins, so it adapts to any panel width, row
- * height or exchange layout.
+ * Both numbers are drawn in an **overlay layer** (`.tc-idr-layer`) anchored to
+ * the row list, never inside the exchange's cells:
  *
- * The Total (USDT) cell is still rewritten in place: it is a value the exchange
- * itself re-renders, and the engine re-applies it right after.
+ *   - the IDR price sits beside the price,
+ *   - the IDR volume sits over the Total cell, whose own text is made
+ *     transparent while the overlay is active.
  *
- * Number choice: full IDR if it fits beside the price, otherwise compact at the
- * same font size (`1,41 M`), then a tight compact. The full IDR value always
- * stays in the `title` tooltip.
+ * Exchanges re-render cells constantly (React replaces text nodes and wipes
+ * unknown children; MEXC does it on every tick). Writing into those cells made
+ * the volume blink: the exchange wrote USDT, we wrote IDR, repeat. Invisible
+ * exchange text plus an overlay means the exchange can update underneath as
+ * often as it likes and nothing flashes.
+ *
+ * The reference scripts positioned a gold column with hardcoded pixel margins;
+ * this computes the position from each row's live geometry instead, so it fits
+ * any panel width, row height or scroll position.
+ *
+ * Number choice: full IDR when it fits, otherwise compact at the same font size
+ * (`1,41 M`), then a tight compact. The full IDR value always stays in the
+ * `title` tooltip.
  */
-import { cleanText, INJECTED, markRendered, PRICE_IDR, siteText } from './dom';
+import { INJECTED, PRICE_IDR, siteText } from './dom';
 import { refreshRow, type OrderRow } from './detect';
 import { adapterFor, type ExchangeAdapter } from './exchanges';
 import { formatIdr, parseNumber, type IdrMode } from './format';
@@ -55,7 +60,9 @@ function sanitizeColor(value: string | null | undefined): string {
 }
 
 const LAYER = 'tc-idr-layer';
+const VOLUME_IDR = 'tc-idr-volume';
 type Placement = 'price' | 'amount';
+type BadgeKind = 'price' | 'volume';
 
 const BADGE_BASE_STYLE = [
   'position:absolute',
@@ -90,6 +97,7 @@ interface CellMetrics {
   fontPx: number;
   weight: string;
   family: string;
+  color: string;
   position: string;
   epoch: number;
 }
@@ -146,6 +154,7 @@ function metricsFor(cell: HTMLElement): CellMetrics | null {
     fontPx,
     weight: style.fontWeight || '400',
     family: style.fontFamily || 'sans-serif',
+    color: style.color || 'inherit',
     position: style.position || 'static',
     epoch: widthEpoch,
   };
@@ -230,13 +239,18 @@ function chooseVolumeText(
 
 // --- overlay -------------------------------------------------------------
 
-interface BadgeEntry {
-  badge: HTMLElement;
+interface RowOverlay {
   host: HTMLElement;
   layer: HTMLElement;
+  price: HTMLElement | null;
+  volume: HTMLElement | null;
+  /** Exchange element whose text we made invisible for the volume overlay. */
+  target: HTMLElement | null;
+  /** Its original inline colour, restored when we let go. */
+  targetColor: string;
 }
 
-const badgeState = new Map<HTMLElement, BadgeEntry>();
+const overlays = new Map<HTMLElement, RowOverlay>();
 const layers = new Set<HTMLElement>();
 const hostPositions = new WeakSet<HTMLElement>();
 
@@ -262,27 +276,60 @@ function layerFor(host: HTMLElement): HTMLElement {
   return layer;
 }
 
-function badgeFor(row: HTMLElement, host: HTMLElement): BadgeEntry {
-  const existing = badgeState.get(row);
-  if (existing && existing.host === host && existing.badge.isConnected) return existing;
-  if (existing) existing.badge.remove();
+function detach(entry: RowOverlay, kind?: BadgeKind): void {
+  if (kind !== 'volume') {
+    entry.price?.remove();
+    entry.price = null;
+  }
+  if (kind !== 'price') {
+    entry.volume?.remove();
+    entry.volume = null;
+    if (entry.target) {
+      if (entry.target.isConnected) entry.target.style.color = entry.targetColor;
+      entry.target = null;
+    }
+  }
+}
 
-  const layer = layerFor(host);
-  const badge = document.createElement('span');
-  badge.className = `${INJECTED} ${PRICE_IDR}`;
-  badge.setAttribute('aria-hidden', 'true');
-  layer.appendChild(badge);
-
-  const entry: BadgeEntry = { badge, host, layer };
-  badgeState.set(row, entry);
+function overlayFor(rowEl: HTMLElement, host: HTMLElement): RowOverlay {
+  let entry = overlays.get(rowEl);
+  if (entry && entry.host !== host) {
+    detach(entry);
+    entry = undefined;
+  }
+  if (!entry) {
+    entry = { host, layer: layerFor(host), price: null, volume: null, target: null, targetColor: '' };
+    overlays.set(rowEl, entry);
+  }
   return entry;
 }
 
-function cleanupBadges(keep: Set<HTMLElement>): void {
-  for (const [row, entry] of badgeState) {
-    if (keep.has(row) && row.isConnected) continue;
-    entry.badge.remove();
-    badgeState.delete(row);
+function makeBadge(entry: RowOverlay, kind: BadgeKind): HTMLElement {
+  const existing = kind === 'price' ? entry.price : entry.volume;
+  if (existing && existing.isConnected) return existing;
+
+  const badge = document.createElement('span');
+  badge.className = `${INJECTED} ${kind === 'price' ? PRICE_IDR : VOLUME_IDR}`;
+  badge.setAttribute('aria-hidden', 'true');
+  entry.layer.appendChild(badge);
+  if (kind === 'price') entry.price = badge;
+  else entry.volume = badge;
+  return badge;
+}
+
+function cleanupOverlays(
+  keep: Set<HTMLElement>,
+  keepPrice: Set<HTMLElement>,
+  keepVolume: Set<HTMLElement>,
+): void {
+  for (const [rowEl, entry] of overlays) {
+    if (!keep.has(rowEl) || !rowEl.isConnected) {
+      detach(entry);
+      overlays.delete(rowEl);
+      continue;
+    }
+    if (!keepPrice.has(rowEl)) detach(entry, 'price');
+    if (!keepVolume.has(rowEl)) detach(entry, 'volume');
   }
   for (const layer of layers) {
     if (!layer.isConnected) {
@@ -296,10 +343,10 @@ function cleanupBadges(keep: Set<HTMLElement>): void {
   }
 }
 
-/** Remove every overlay (e.g. when the script is disabled at runtime). */
+/** Remove every overlay and give the exchange its Total text back. */
 function clearOverlays(): void {
-  for (const entry of badgeState.values()) entry.badge.remove();
-  badgeState.clear();
+  for (const entry of overlays.values()) detach(entry);
+  overlays.clear();
   for (const layer of layers) layer.remove();
   layers.clear();
 }
@@ -336,9 +383,13 @@ interface PriceWrite {
 }
 
 interface VolumeWrite {
-  target: HTMLElement;
+  rowEl: HTMLElement;
+  host: HTMLElement;
+  cell: HTMLElement;
+  leaf: HTMLElement;
   text: string;
-  original: string;
+  full: string;
+  textWidth: number;
   color: string;
 }
 
@@ -349,8 +400,16 @@ function planRows(
 ): { prices: PriceWrite[]; volumes: VolumeWrite[] } {
   const prices: PriceWrite[] = [];
   const volumes: VolumeWrite[] = [];
-  const volumeColor = sanitizeColor(config.volumeColor);
   const rowElements = rows.map((row) => row.row);
+  const hosts = new Map<HTMLElement, HTMLElement>();
+
+  const hostOf = (row: OrderRow): HTMLElement => {
+    const existing = hosts.get(row.row);
+    if (existing) return existing;
+    const host = hostFor(row.row, rowElements);
+    hosts.set(row.row, host);
+    return host;
+  };
 
   for (const row of rows) {
     const priceText = siteText(row.price.el);
@@ -377,7 +436,7 @@ function planRows(
 
       prices.push({
         rowEl: row.row,
-        host: hostFor(row.row, rowElements),
+        host: hostOf(row),
         cell,
         text: choice.text,
         full,
@@ -390,19 +449,23 @@ function planRows(
     }
 
     if (config.convertTotal) {
-      const original = siteText(row.total.el);
-      const total = parseNumber(original);
+      const total = parseNumber(siteText(row.total.el));
       if (total == null || total <= 0) continue;
 
       const idr = total * rate;
       const full = formatIdr(idr, { prefix: config.prefix, mode: config.volumeMode });
       const compact = formatIdr(idr, { prefix: config.prefix, mode: 'compact' });
       const metrics = metricsFor(row.totalCell);
+      const text = chooseVolumeText(full, compact, metrics, config.fit);
       volumes.push({
-        target: row.total.el,
-        text: chooseVolumeText(full, compact, metrics, config.fit),
-        original,
-        color: volumeColor,
+        rowEl: row.row,
+        host: hostOf(row),
+        cell: row.totalCell,
+        leaf: row.total.el,
+        text,
+        full,
+        textWidth: metrics ? measureText(text, fontFor(metrics, 1)) : text.length * 7,
+        color: sanitizeColor(config.volumeColor) || metrics?.color || 'inherit',
       });
     }
   }
@@ -410,71 +473,130 @@ function planRows(
   return { prices, volumes };
 }
 
-function applyPrices(writes: PriceWrite[], config: OrderbookConfig): void {
-  const keep = new Set<HTMLElement>();
-  const color = sanitizeColor(config.priceColor);
+function styleFor(
+  left: number,
+  top: number,
+  height: number,
+  fontEm: number,
+  color: string,
+  opacity: string,
+): string {
+  return [
+    ...BADGE_BASE_STYLE,
+    `left:${Math.round(left)}px`,
+    `top:${Math.round(top)}px`,
+    `height:${Math.round(height)}px`,
+    `line-height:${Math.round(height)}px`,
+    `font-size:${fontEm}em`,
+    `color:${color}`,
+    `opacity:${opacity}`,
+  ].join(';');
+}
 
-  // Pass 1: make sure every row has a badge in the right layer (no layout reads).
-  const placed: Array<{ write: PriceWrite; entry: BadgeEntry }> = [];
-  for (const write of writes) {
-    const entry = badgeFor(write.rowEl, write.host);
-    keep.add(write.rowEl);
-    placed.push({ write, entry });
+function paint(
+  badge: HTMLElement,
+  style: string,
+  text: string,
+  full: string,
+): void {
+  if (badge.dataset['tcStyle'] !== style) {
+    badge.dataset['tcStyle'] = style;
+    badge.setAttribute('style', `${style};display:inline-block`);
+  } else if (badge.style.display === 'none') {
+    badge.style.display = 'inline-block';
   }
-  cleanupBadges(keep);
+  if (badge.textContent !== text) badge.textContent = text;
+  if (badge.getAttribute('title') !== full) badge.setAttribute('title', full);
+}
 
-  // Pass 2: read geometry...
-  const positions = placed.map(({ write, entry }) => {
-    const cellRect = write.cell.getBoundingClientRect();
-    const layerRect = entry.layer.getBoundingClientRect();
-    return { write, entry, cellRect, layerRect };
-  });
+function applyOverlays(
+  prices: PriceWrite[],
+  volumes: VolumeWrite[],
+  config: OrderbookConfig,
+): void {
+  const keep = new Set<HTMLElement>();
+  const keepPrice = new Set<HTMLElement>();
+  const keepVolume = new Set<HTMLElement>();
+  const pricePlaced: Array<{ write: PriceWrite; entry: RowOverlay; badge: HTMLElement }> = [];
+  const volumePlaced: Array<{ write: VolumeWrite; entry: RowOverlay; badge: HTMLElement }> = [];
 
-  // Pass 3: write styles/text.
-  for (const { write, entry, cellRect, layerRect } of positions) {
+  // Pass 1: make sure every row has the badges it needs (writes only).
+  for (const write of prices) {
+    keep.add(write.rowEl);
+    keepPrice.add(write.rowEl);
+    const entry = overlayFor(write.rowEl, write.host);
+    pricePlaced.push({ write, entry, badge: makeBadge(entry, 'price') });
+  }
+
+  for (const write of volumes) {
+    keep.add(write.rowEl);
+    keepVolume.add(write.rowEl);
+    const entry = overlayFor(write.rowEl, write.host);
+    const badge = makeBadge(entry, 'volume');
+
+    // Let the exchange keep updating its own total text, but keep it invisible.
+    if (entry.target !== write.leaf) {
+      if (entry.target && entry.target.isConnected) entry.target.style.color = entry.targetColor;
+      entry.target = write.leaf;
+      entry.targetColor = write.leaf.style.color || '';
+    }
+    if (write.leaf.style.color !== 'transparent') write.leaf.style.color = 'transparent';
+
+    volumePlaced.push({ write, entry, badge });
+  }
+
+  cleanupOverlays(keep, keepPrice, keepVolume);
+
+  // Pass 2: geometry (reads only).
+  const pricePositions = pricePlaced.map((item) => ({
+    ...item,
+    cellRect: item.write.cell.getBoundingClientRect(),
+    layerRect: item.entry.layer.getBoundingClientRect(),
+  }));
+  const volumePositions = volumePlaced.map((item) => ({
+    ...item,
+    cellRect: item.write.cell.getBoundingClientRect(),
+    layerRect: item.entry.layer.getBoundingClientRect(),
+  }));
+
+  // Pass 3: paint.
+  const priceColor = sanitizeColor(config.priceColor);
+  for (const { write, badge, cellRect, layerRect } of pricePositions) {
     if (cellRect.width <= 0 || cellRect.height <= 0) {
-      entry.badge.style.display = 'none';
+      badge.style.display = 'none';
       continue;
     }
-
     const width = write.textWidth + 2;
     const left =
       write.placement === 'price'
         ? cellRect.left - layerRect.left + cellRect.width - width - 2
         : cellRect.left - layerRect.left + 2;
-    const top = cellRect.top - layerRect.top;
-    const height = cellRect.height;
-    const style = [
-      ...BADGE_BASE_STYLE,
-      `left:${Math.round(left)}px`,
-      `top:${Math.round(top)}px`,
-      `height:${Math.round(height)}px`,
-      `line-height:${Math.round(height)}px`,
-      `font-size:${write.fontEm}em`,
-      `color:${color || 'inherit'}`,
-      `opacity:${color ? '1' : '0.75'}`,
-    ].join(';');
-
-    if (entry.badge.dataset['tcStyle'] !== style) {
-      entry.badge.dataset['tcStyle'] = style;
-      entry.badge.setAttribute('style', `${style};display:inline-block`);
-    } else if (entry.badge.style.display === 'none') {
-      entry.badge.style.display = 'inline-block';
-    }
-    if (entry.badge.textContent !== write.text) entry.badge.textContent = write.text;
-    if (entry.badge.getAttribute('title') !== write.full) entry.badge.setAttribute('title', write.full);
+    const style = styleFor(
+      left,
+      cellRect.top - layerRect.top,
+      cellRect.height,
+      write.fontEm,
+      priceColor || 'inherit',
+      priceColor ? '1' : '0.75',
+    );
+    paint(badge, style, write.text, write.full);
   }
-}
 
-function applyVolumes(writes: VolumeWrite[]): void {
-  for (const write of writes) {
-    if (write.color && write.target.style.color !== write.color) {
-      write.target.style.color = write.color;
+  for (const { write, badge, cellRect, layerRect } of volumePositions) {
+    if (cellRect.width <= 0 || cellRect.height <= 0) {
+      badge.style.display = 'none';
+      continue;
     }
-    if (cleanText(write.target) === write.text) continue;
-    markRendered(write.target, write.text);
-    write.target.dataset['tcOrig'] = write.original;
-    write.target.textContent = write.text;
+    const width = write.textWidth + 2;
+    const style = styleFor(
+      cellRect.right - layerRect.left - width - 2,
+      cellRect.top - layerRect.top,
+      cellRect.height,
+      1,
+      write.color,
+      '1',
+    );
+    paint(badge, style, write.text, write.full);
   }
 }
 
@@ -552,8 +674,7 @@ export function startOrderbook(options: {
 
     const config = options.getConfig();
     const plan = planRows(current, options.getRate(), config);
-    applyVolumes(plan.volumes);
-    applyPrices(plan.prices, config);
+    applyOverlays(plan.prices, plan.volumes, config);
   };
 
   const schedule = (delay = 120): void => {

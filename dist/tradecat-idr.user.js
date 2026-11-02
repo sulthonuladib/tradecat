@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.1
+// @version      0.3.2
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       tradecat
 // @license      MIT
@@ -28,6 +28,7 @@
 // @connect      api.gateio.ws
 // @connect      www.mexc.fm
 // @connect      www.mexc.com
+// @connect      api.mexc.com
 // @connect      indodax.com
 // @connect      api.coingecko.com
 // ==/UserScript==
@@ -354,9 +355,6 @@ coin:
     return out.trim();
   }
   var rendered = new WeakMap;
-  function markRendered(el, text) {
-    rendered.set(el, text);
-  }
   function siteText(el) {
     const current = cleanText(el);
     const previous = rendered.get(el);
@@ -918,6 +916,7 @@ coin:
     return COLOR_RE.test(candidate) ? candidate : "";
   }
   var LAYER = "tc-idr-layer";
+  var VOLUME_IDR = "tc-idr-volume";
   var BADGE_BASE_STYLE = [
     "position:absolute",
     "font-weight:400",
@@ -982,6 +981,7 @@ coin:
       fontPx,
       weight: style.fontWeight || "400",
       family: style.fontFamily || "sans-serif",
+      color: style.color || "inherit",
       position: style.position || "static",
       epoch: widthEpoch
     };
@@ -1031,7 +1031,7 @@ coin:
       return compact;
     return compact.replace(/\s+/g, "");
   }
-  var badgeState = new Map;
+  var overlays = new Map;
   var layers = new Set;
   var hostPositions = new WeakSet;
   function layerFor(host) {
@@ -1053,27 +1053,58 @@ coin:
     }
     return layer;
   }
-  function badgeFor(row, host) {
-    const existing = badgeState.get(row);
-    if (existing && existing.host === host && existing.badge.isConnected)
-      return existing;
-    if (existing)
-      existing.badge.remove();
-    const layer = layerFor(host);
-    const badge = document.createElement("span");
-    badge.className = `${INJECTED} ${PRICE_IDR}`;
-    badge.setAttribute("aria-hidden", "true");
-    layer.appendChild(badge);
-    const entry = { badge, host, layer };
-    badgeState.set(row, entry);
+  function detach(entry, kind) {
+    if (kind !== "volume") {
+      entry.price?.remove();
+      entry.price = null;
+    }
+    if (kind !== "price") {
+      entry.volume?.remove();
+      entry.volume = null;
+      if (entry.target) {
+        if (entry.target.isConnected)
+          entry.target.style.color = entry.targetColor;
+        entry.target = null;
+      }
+    }
+  }
+  function overlayFor(rowEl, host) {
+    let entry = overlays.get(rowEl);
+    if (entry && entry.host !== host) {
+      detach(entry);
+      entry = undefined;
+    }
+    if (!entry) {
+      entry = { host, layer: layerFor(host), price: null, volume: null, target: null, targetColor: "" };
+      overlays.set(rowEl, entry);
+    }
     return entry;
   }
-  function cleanupBadges(keep) {
-    for (const [row, entry] of badgeState) {
-      if (keep.has(row) && row.isConnected)
+  function makeBadge(entry, kind) {
+    const existing = kind === "price" ? entry.price : entry.volume;
+    if (existing && existing.isConnected)
+      return existing;
+    const badge = document.createElement("span");
+    badge.className = `${INJECTED} ${kind === "price" ? PRICE_IDR : VOLUME_IDR}`;
+    badge.setAttribute("aria-hidden", "true");
+    entry.layer.appendChild(badge);
+    if (kind === "price")
+      entry.price = badge;
+    else
+      entry.volume = badge;
+    return badge;
+  }
+  function cleanupOverlays(keep, keepPrice, keepVolume) {
+    for (const [rowEl, entry] of overlays) {
+      if (!keep.has(rowEl) || !rowEl.isConnected) {
+        detach(entry);
+        overlays.delete(rowEl);
         continue;
-      entry.badge.remove();
-      badgeState.delete(row);
+      }
+      if (!keepPrice.has(rowEl))
+        detach(entry, "price");
+      if (!keepVolume.has(rowEl))
+        detach(entry, "volume");
     }
     for (const layer of layers) {
       if (!layer.isConnected) {
@@ -1087,9 +1118,9 @@ coin:
     }
   }
   function clearOverlays() {
-    for (const entry of badgeState.values())
-      entry.badge.remove();
-    badgeState.clear();
+    for (const entry of overlays.values())
+      detach(entry);
+    overlays.clear();
     for (const layer of layers)
       layer.remove();
     layers.clear();
@@ -1112,8 +1143,16 @@ coin:
   function planRows(rows, rate, config) {
     const prices = [];
     const volumes = [];
-    const volumeColor = sanitizeColor(config.volumeColor);
     const rowElements = rows.map((row) => row.row);
+    const hosts = new Map;
+    const hostOf = (row) => {
+      const existing = hosts.get(row.row);
+      if (existing)
+        return existing;
+      const host = hostFor(row.row, rowElements);
+      hosts.set(row.row, host);
+      return host;
+    };
     for (const row of rows) {
       const priceText = siteText(row.price.el);
       const price = parseNumber(priceText);
@@ -1129,7 +1168,7 @@ coin:
         const hostMetrics = choice.placement === "amount" ? amountMetrics : priceMetrics;
         prices.push({
           rowEl: row.row,
-          host: hostFor(row.row, rowElements),
+          host: hostOf(row),
           cell,
           text: choice.text,
           full,
@@ -1139,80 +1178,109 @@ coin:
         });
       }
       if (config.convertTotal) {
-        const original = siteText(row.total.el);
-        const total = parseNumber(original);
+        const total = parseNumber(siteText(row.total.el));
         if (total == null || total <= 0)
           continue;
         const idr = total * rate;
         const full = formatIdr(idr, { prefix: config.prefix, mode: config.volumeMode });
         const compact = formatIdr(idr, { prefix: config.prefix, mode: "compact" });
         const metrics = metricsFor(row.totalCell);
+        const text = chooseVolumeText(full, compact, metrics, config.fit);
         volumes.push({
-          target: row.total.el,
-          text: chooseVolumeText(full, compact, metrics, config.fit),
-          original,
-          color: volumeColor
+          rowEl: row.row,
+          host: hostOf(row),
+          cell: row.totalCell,
+          leaf: row.total.el,
+          text,
+          full,
+          textWidth: metrics ? measureText(text, fontFor(metrics, 1)) : text.length * 7,
+          color: sanitizeColor(config.volumeColor) || metrics?.color || "inherit"
         });
       }
     }
     return { prices, volumes };
   }
-  function applyPrices(writes, config) {
-    const keep = new Set;
-    const color = sanitizeColor(config.priceColor);
-    const placed = [];
-    for (const write of writes) {
-      const entry = badgeFor(write.rowEl, write.host);
-      keep.add(write.rowEl);
-      placed.push({ write, entry });
+  function styleFor(left, top, height, fontEm, color, opacity) {
+    return [
+      ...BADGE_BASE_STYLE,
+      `left:${Math.round(left)}px`,
+      `top:${Math.round(top)}px`,
+      `height:${Math.round(height)}px`,
+      `line-height:${Math.round(height)}px`,
+      `font-size:${fontEm}em`,
+      `color:${color}`,
+      `opacity:${opacity}`
+    ].join(";");
+  }
+  function paint(badge, style, text, full) {
+    if (badge.dataset["tcStyle"] !== style) {
+      badge.dataset["tcStyle"] = style;
+      badge.setAttribute("style", `${style};display:inline-block`);
+    } else if (badge.style.display === "none") {
+      badge.style.display = "inline-block";
     }
-    cleanupBadges(keep);
-    const positions = placed.map(({ write, entry }) => {
-      const cellRect = write.cell.getBoundingClientRect();
-      const layerRect = entry.layer.getBoundingClientRect();
-      return { write, entry, cellRect, layerRect };
-    });
-    for (const { write, entry, cellRect, layerRect } of positions) {
+    if (badge.textContent !== text)
+      badge.textContent = text;
+    if (badge.getAttribute("title") !== full)
+      badge.setAttribute("title", full);
+  }
+  function applyOverlays(prices, volumes, config) {
+    const keep = new Set;
+    const keepPrice = new Set;
+    const keepVolume = new Set;
+    const pricePlaced = [];
+    const volumePlaced = [];
+    for (const write of prices) {
+      keep.add(write.rowEl);
+      keepPrice.add(write.rowEl);
+      const entry = overlayFor(write.rowEl, write.host);
+      pricePlaced.push({ write, entry, badge: makeBadge(entry, "price") });
+    }
+    for (const write of volumes) {
+      keep.add(write.rowEl);
+      keepVolume.add(write.rowEl);
+      const entry = overlayFor(write.rowEl, write.host);
+      const badge = makeBadge(entry, "volume");
+      if (entry.target !== write.leaf) {
+        if (entry.target && entry.target.isConnected)
+          entry.target.style.color = entry.targetColor;
+        entry.target = write.leaf;
+        entry.targetColor = write.leaf.style.color || "";
+      }
+      if (write.leaf.style.color !== "transparent")
+        write.leaf.style.color = "transparent";
+      volumePlaced.push({ write, entry, badge });
+    }
+    cleanupOverlays(keep, keepPrice, keepVolume);
+    const pricePositions = pricePlaced.map((item) => ({
+      ...item,
+      cellRect: item.write.cell.getBoundingClientRect(),
+      layerRect: item.entry.layer.getBoundingClientRect()
+    }));
+    const volumePositions = volumePlaced.map((item) => ({
+      ...item,
+      cellRect: item.write.cell.getBoundingClientRect(),
+      layerRect: item.entry.layer.getBoundingClientRect()
+    }));
+    const priceColor = sanitizeColor(config.priceColor);
+    for (const { write, badge, cellRect, layerRect } of pricePositions) {
       if (cellRect.width <= 0 || cellRect.height <= 0) {
-        entry.badge.style.display = "none";
+        badge.style.display = "none";
         continue;
       }
       const width = write.textWidth + 2;
       const left = write.placement === "price" ? cellRect.left - layerRect.left + cellRect.width - width - 2 : cellRect.left - layerRect.left + 2;
-      const top = cellRect.top - layerRect.top;
-      const height = cellRect.height;
-      const style = [
-        ...BADGE_BASE_STYLE,
-        `left:${Math.round(left)}px`,
-        `top:${Math.round(top)}px`,
-        `height:${Math.round(height)}px`,
-        `line-height:${Math.round(height)}px`,
-        `font-size:${write.fontEm}em`,
-        `color:${color || "inherit"}`,
-        `opacity:${color ? "1" : "0.75"}`
-      ].join(";");
-      if (entry.badge.dataset["tcStyle"] !== style) {
-        entry.badge.dataset["tcStyle"] = style;
-        entry.badge.setAttribute("style", `${style};display:inline-block`);
-      } else if (entry.badge.style.display === "none") {
-        entry.badge.style.display = "inline-block";
-      }
-      if (entry.badge.textContent !== write.text)
-        entry.badge.textContent = write.text;
-      if (entry.badge.getAttribute("title") !== write.full)
-        entry.badge.setAttribute("title", write.full);
+      const style = styleFor(left, cellRect.top - layerRect.top, cellRect.height, write.fontEm, priceColor || "inherit", priceColor ? "1" : "0.75");
+      paint(badge, style, write.text, write.full);
     }
-  }
-  function applyVolumes(writes) {
-    for (const write of writes) {
-      if (write.color && write.target.style.color !== write.color) {
-        write.target.style.color = write.color;
-      }
-      if (cleanText(write.target) === write.text)
+    for (const { write, badge, cellRect, layerRect } of volumePositions) {
+      if (cellRect.width <= 0 || cellRect.height <= 0) {
+        badge.style.display = "none";
         continue;
-      markRendered(write.target, write.text);
-      write.target.dataset["tcOrig"] = write.original;
-      write.target.textContent = write.text;
+      }
+      const width = write.textWidth + 2;
+      const style = styleFor(cellRect.right - layerRect.left - width - 2, cellRect.top - layerRect.top, cellRect.height, 1, write.color, "1");
+      paint(badge, style, write.text, write.full);
     }
   }
   function describeOrderbook(site) {
@@ -1265,8 +1333,7 @@ coin:
         return;
       const config = options.getConfig();
       const plan = planRows(current, options.getRate(), config);
-      applyVolumes(plan.volumes);
-      applyPrices(plan.prices, config);
+      applyOverlays(plan.prices, plan.volumes, config);
     };
     const schedule = (delay = 120) => {
       if (stopped || debounce !== null)
@@ -1310,68 +1377,205 @@ coin:
 
   // src/lib/coininfo.ts
   var CACHE_TTL = 10 * 60 * 1000;
-  var gateUrl = (coin) => `https://api.gateio.ws/api/v4/spot/currencies/${encodeURIComponent(coin)}`;
-  var mexcUrls = (coin) => [
-    `https://www.mexc.com/api/asset/v1/coin/detail?currency=${encodeURIComponent(coin)}`,
-    `https://www.mexc.com/api/v3/capital/config/getall`,
-    `https://www.mexc.fm/api/v3/capital/config/getall`,
-    `https://www.mexc.com/api/asset/v1/coin/list`
-  ];
-  var cacheKey = (site, coin) => `coininfo.${site}.${coin}`;
+  var CACHE_PREFIX = "coininfo.v2";
+  var cacheKey = (site, coin) => `${CACHE_PREFIX}.${site}.${coin}`;
+  var num = (value) => {
+    if (value === null || value === undefined || value === "")
+      return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
   function asBool(value, fallback = true) {
     if (typeof value === "boolean")
       return value;
     if (typeof value === "number")
       return value !== 0;
     if (typeof value === "string")
-      return !/^(false|0|off|disabled?)$/i.test(value.trim());
+      return !/^(false|0|off|disabled?|no)$/i.test(value.trim());
     return fallback;
   }
-  function pickChainList(raw) {
-    const candidates = [raw?.networkList, raw?.chains, raw?.networks, raw?.data?.networkList];
-    for (const candidate of candidates)
-      if (Array.isArray(candidate))
-        return candidate;
+  function listOf(value) {
+    if (Array.isArray(value))
+      return value;
+    if (value && typeof value === "object")
+      return Object.values(value);
     return [];
   }
-  function fromGate(raw, coin) {
-    const chains = (Array.isArray(raw?.chains) ? raw.chains : []).map((chain) => ({
-      name: String(chain?.name ?? chain?.chain ?? "?"),
-      deposit: !asBool(chain?.deposit_disabled, false),
-      withdraw: !asBool(chain?.withdraw_disabled, false),
-      depositDelayed: asBool(chain?.deposit_delayed, false),
-      withdrawDelayed: asBool(chain?.withdraw_delayed, false)
-    }));
+  function chainNameOf(chain) {
+    return String(chain?.chainName ?? chain?.chain ?? chain?.network ?? chain?.name ?? "").trim().toUpperCase();
+  }
+  var emptyChain = (name) => ({
+    name,
+    deposit: true,
+    withdraw: true,
+    depositDelayed: false,
+    withdrawDelayed: false,
+    fee: null,
+    feePercent: null,
+    minWithdraw: null,
+    maxWithdraw: null
+  });
+  function coinsDeposit(chains, fallback = true) {
+    return chains.length ? chains.some((chain) => chain.deposit) : fallback;
+  }
+  function coinsWithdraw(chains, fallback = true) {
+    return chains.length ? chains.some((chain) => chain.withdraw) : fallback;
+  }
+  function gateInfoFrom(chainsRaw, feeBody, coin) {
+    const fees = new Map;
+    let priceUsdt = null;
+    let needsLogin = false;
+    const message = String(feeBody?.resMsg?.message ?? feeBody?.message ?? "");
+    if (feeBody && (Number(feeBody?.resMsg?.code) === 1000 || /log ?in|login first/i.test(message))) {
+      needsLogin = true;
+    } else if (feeBody) {
+      priceUsdt = num(feeBody?.datas?.rate_usdt ?? feeBody?.datas?.rateUsdt);
+      for (const chain of listOf(feeBody?.datas?.chains)) {
+        const name = chainNameOf(chain);
+        if (!name)
+          continue;
+        fees.set(name, {
+          fee: num(chain?.withdraw_txfee ?? chain?.withdraw_fee ?? chain?.withdrawFix),
+          percent: num(chain?.withdraw_percent ?? chain?.withdrawPercent),
+          min: num(chain?.withdraw_min ?? chain?.withdrawMin),
+          max: num(chain?.withdraw_max ?? chain?.withdrawMax)
+        });
+      }
+    }
+    const chains = [];
+    for (const raw of listOf(chainsRaw)) {
+      const name = chainNameOf(raw);
+      if (!name)
+        continue;
+      const fee = fees.get(name);
+      const disabled = asBool(raw?.is_disabled, false);
+      chains.push({
+        name,
+        deposit: !disabled && !asBool(raw?.is_deposit_disabled, false),
+        withdraw: !disabled && !asBool(raw?.is_withdraw_disabled, false),
+        depositDelayed: asBool(raw?.deposit_delayed, false),
+        withdrawDelayed: asBool(raw?.withdraw_delayed, false),
+        fee: fee?.fee ?? null,
+        feePercent: fee?.percent ?? null,
+        minWithdraw: num(raw?.withdraw_amount_min ?? raw?.withdraw_min) ?? fee?.min ?? null,
+        maxWithdraw: num(raw?.withdraw_amount_max ?? raw?.withdraw_max) ?? fee?.max ?? null
+      });
+    }
+    for (const [name, fee] of fees) {
+      if (chains.some((chain) => chain.name === name))
+        continue;
+      chains.push({
+        ...emptyChain(name),
+        fee: fee.fee,
+        feePercent: fee.percent,
+        minWithdraw: fee.min,
+        maxWithdraw: fee.max
+      });
+    }
     return {
       coin,
-      deposit: !asBool(raw?.deposit_disabled, false),
-      withdraw: !asBool(raw?.withdraw_disabled, false),
+      deposit: coinsDeposit(chains),
+      withdraw: coinsWithdraw(chains),
       chains,
-      source: "gate:spot/currencies",
-      updatedAt: Date.now()
+      priceUsdt,
+      source: needsLogin ? "gate:wallet/currency_chains (login for fees)" : "gate:wallet/currency_chains + json_svr",
+      updatedAt: Date.now(),
+      needsLogin
     };
   }
-  function fromMexc(raw, coin) {
-    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : Array.isArray(raw?.data?.list) ? raw.data.list : [];
-    const entry = list.find((item) => String(item?.coin ?? item?.currency ?? item?.symbol ?? "").toUpperCase() === coin) ?? (String(raw?.coin ?? raw?.currency ?? "").toUpperCase() === coin ? raw : null);
-    if (!entry)
-      return null;
-    const chains = pickChainList(entry).map((chain) => ({
-      name: String(chain?.network ?? chain?.chain ?? chain?.name ?? "?"),
-      deposit: asBool(chain?.depositEnable ?? chain?.deposit_enable ?? chain?.depositEnabled, true),
-      withdraw: asBool(chain?.withdrawEnable ?? chain?.withdraw_enable ?? chain?.withdrawEnabled, true),
-      depositDelayed: asBool(chain?.depositDelayed ?? chain?.deposit_delayed, false),
-      withdrawDelayed: asBool(chain?.withdrawDelayed ?? chain?.withdraw_delayed, false),
-      minWithdraw: chain?.withdrawMin != null ? Number(chain.withdrawMin) : null
-    }));
+  function mexcInfoFrom(body, coin) {
+    const code = Number(body?.code);
+    const message = String(body?.msg ?? body?.message ?? "");
+    if (code === 401 || /log ?in/i.test(message)) {
+      return {
+        coin,
+        deposit: true,
+        withdraw: true,
+        chains: [],
+        priceUsdt: null,
+        source: "mexc:currency/v3 (login required)",
+        updatedAt: Date.now(),
+        needsLogin: true
+      };
+    }
+    const data = body?.data ?? body;
+    const chains = [];
+    for (const raw of listOf(data?.chains ?? data?.networkList ?? data?.networks)) {
+      const name = chainNameOf(raw);
+      if (!name)
+        continue;
+      chains.push({
+        name,
+        deposit: asBool(raw?.enableDeposit ?? raw?.depositEnable ?? raw?.deposit_enable, true),
+        withdraw: asBool(raw?.enableWithdraw ?? raw?.withdrawEnable ?? raw?.withdraw_enable, true),
+        depositDelayed: asBool(raw?.depositDelayed ?? raw?.deposit_delayed, false),
+        withdrawDelayed: asBool(raw?.withdrawDelayed ?? raw?.withdraw_delayed, false),
+        fee: num(raw?.withdrawFee ?? raw?.withdraw_fee ?? raw?.fee),
+        feePercent: num(raw?.withdrawFeePercent ?? raw?.withdrawPercent ?? raw?.withdraw_percent),
+        minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min ?? raw?.minWithdraw),
+        maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max ?? raw?.maxWithdraw)
+      });
+    }
     return {
       coin,
-      deposit: asBool(entry?.depositEnable ?? entry?.deposit_enable, true),
-      withdraw: asBool(entry?.withdrawEnable ?? entry?.withdraw_enable, true),
+      deposit: coinsDeposit(chains, asBool(data?.enableDeposit, true)),
+      withdraw: coinsWithdraw(chains, asBool(data?.enableWithdraw, true)),
       chains,
-      source: "mexc:asset",
-      updatedAt: Date.now()
+      priceUsdt: num(data?.currencyPrice ?? data?.currency_price),
+      source: "mexc:currency/v3",
+      updatedAt: Date.now(),
+      needsLogin: false
     };
+  }
+  var gateChainsUrl = (coin) => `https://api.gateio.ws/api/v4/wallet/currency_chains?currency=${encodeURIComponent(coin)}`;
+  var gateTickerUrl = (coin) => `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${encodeURIComponent(coin)}_USDT`;
+  var mexcCurrencyUrl = (coin) => `/api/platform/asset/api/asset/spot/currency/v3?currency=${encodeURIComponent(coin)}`;
+  var mexcTickerUrl = (coin) => `https://api.mexc.com/api/v3/ticker/price?symbol=${encodeURIComponent(coin)}USDT`;
+  async function gateFeeBody(coin) {
+    if (typeof fetch !== "function")
+      throw new Error("fetch unavailable");
+    const csrf = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)?.[1];
+    const headers = { "content-type": "application/x-www-form-urlencoded" };
+    if (csrf)
+      headers["Csrftoken"] = decodeURIComponent(csrf);
+    const response = await fetch("/json_svr/query?u=116", {
+      method: "POST",
+      credentials: "same-origin",
+      headers,
+      body: new URLSearchParams({ type: "getWithdrawChainsInfo", curr_type: coin }).toString()
+    });
+    if (!response.ok)
+      throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+  async function mexcCurrencyBody(coin) {
+    if (typeof fetch !== "function")
+      throw new Error("fetch unavailable");
+    const response = await fetch(mexcCurrencyUrl(coin), {
+      credentials: "same-origin",
+      headers: { accept: "application/json" }
+    });
+    if (!response.ok)
+      throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+  async function gatePriceUsdt(coin) {
+    try {
+      const rows = await requestJson(gateTickerUrl(coin), 8000);
+      const pair = `${coin.toUpperCase()}_USDT`;
+      const row = Array.isArray(rows) ? rows.find((item) => String(item?.currency_pair).toUpperCase() === pair) : null;
+      return num(row?.last);
+    } catch {
+      return null;
+    }
+  }
+  async function mexcPriceUsdt(coin) {
+    try {
+      const raw = await requestJson(mexcTickerUrl(coin), 8000);
+      return num(raw?.price);
+    } catch {
+      return null;
+    }
   }
   function readCache(site, coin) {
     const cached = getStored(cacheKey(site, coin), null);
@@ -1381,48 +1585,61 @@ coin:
       return null;
     return cached;
   }
+  function unavailable(coin, message) {
+    return {
+      coin,
+      deposit: true,
+      withdraw: true,
+      chains: [],
+      priceUsdt: null,
+      source: "unavailable",
+      updatedAt: Date.now(),
+      needsLogin: false,
+      error: message
+    };
+  }
   async function getCoinInfo(site, coin, force = false) {
     if (!force) {
       const cached = readCache(site, coin);
       if (cached)
         return cached;
     }
-    const fail = (message) => ({
-      coin,
-      deposit: true,
-      withdraw: true,
-      chains: [],
-      source: "unavailable",
-      updatedAt: Date.now(),
-      error: message
-    });
     if (site === "gate") {
+      let chainsRaw = [];
+      let feeBody = null;
       try {
-        const raw = await requestJson(gateUrl(coin));
-        const info = fromGate(raw, coin);
-        setStored(cacheKey(site, coin), info);
-        return info;
+        chainsRaw = await requestJson(gateChainsUrl(coin));
       } catch (error) {
-        log("gate coin info failed", error);
-        return fail("Gate API unreachable");
+        log("gate currency_chains failed", error);
       }
+      try {
+        feeBody = await gateFeeBody(coin);
+      } catch (error) {
+        log("gate withdraw fee request failed", error);
+      }
+      if (!listOf(chainsRaw).length && !feeBody)
+        return unavailable(coin, "Gate API unreachable");
+      const info = gateInfoFrom(chainsRaw, feeBody, coin);
+      if (info.priceUsdt == null)
+        info.priceUsdt = await gatePriceUsdt(coin);
+      setStored(cacheKey(site, coin), info);
+      return info;
     }
     if (site === "mexc") {
-      for (const url of mexcUrls(coin)) {
-        try {
-          const raw = await requestJson(url);
-          const info = fromMexc(raw, coin);
-          if (info) {
-            setStored(cacheKey(site, coin), info);
-            return info;
-          }
-        } catch (error) {
-          log(`mexc coin info failed (${url})`, error);
-        }
+      let body;
+      try {
+        body = await mexcCurrencyBody(coin);
+      } catch (error) {
+        log("mexc currency/v3 failed", error);
+        return unavailable(coin, "MEXC asset API unreachable");
       }
-      return fail("MEXC asset API unavailable");
+      const info = mexcInfoFrom(body, coin);
+      if (info.priceUsdt == null && !info.needsLogin)
+        info.priceUsdt = await mexcPriceUsdt(coin);
+      setStored(cacheKey(site, coin), info);
+      return info;
     }
-    return fail("Unsupported site");
+    return unavailable(coin, "Unsupported site");
   }
 
   // src/lib/panel.ts
@@ -1475,16 +1692,21 @@ coin:
 .chip.ok { color: #c9d1d9; } .chip.ok i { background: #2ea043; } .chip.ok b { color: #3fb950; }
 .chip.bad { color: #c9d1d9; } .chip.bad i { background: #f85149; } .chip.bad b { color: #f85149; }
 .chip.warn i { background: #d29922; } .chip.warn b { color: #d29922; }
-.chains { display: flex; flex-direction: column; gap: 2px; max-height: 132px; overflow-y: auto; }
+.chains { display: flex; flex-direction: column; gap: 2px; max-height: 168px; overflow-y: auto; }
 .chain {
-  display: flex; align-items: center; gap: 6px; font-size: 11px;
-  padding: 2px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.03);
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0 6px;
+  font-size: 11px; padding: 3px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.03);
 }
 .chain .name { color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chain .flags { margin-left: auto; display: flex; gap: 6px; font-variant-numeric: tabular-nums; }
+.chain .flags { display: flex; gap: 6px; font-variant-numeric: tabular-nums; }
 .chain .flags span { color: #6e7681; }
 .chain .flags span.yes { color: #3fb950; }
 .chain .flags span.no { color: #f85149; }
+.chain .fee {
+  grid-column: 1 / -1; font-size: 10px; color: #ead05a;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chain.hint { display: block; color: #d29922; font-size: 10px; background: none; padding: 2px 4px; }
 .actions { display: flex; gap: 6px; }
 .btn {
   all: unset; flex: 1; text-align: center; cursor: pointer;
@@ -1498,6 +1720,23 @@ coin:
 .foot { font-size: 10px; color: #6e7681; display: flex; gap: 6px; align-items: center; }
 .foot .retry { all: unset; cursor: pointer; color: #58a6ff; }
 `;
+  function formatCoin(value) {
+    return value.toLocaleString("id-ID", { maximumFractionDigits: 8 });
+  }
+  function feeLabel(chain, coin, priceUsdt, usdtIdr) {
+    const parts = [];
+    if (chain.fee != null) {
+      const coinAmount = `${formatCoin(chain.fee)} ${coin}`;
+      if (priceUsdt && usdtIdr) {
+        parts.push(`${coinAmount} ≈ ${formatIdr(chain.fee * priceUsdt * usdtIdr)}`);
+      } else {
+        parts.push(coinAmount);
+      }
+    }
+    if (chain.feePercent)
+      parts.push(`${formatCoin(chain.feePercent)}%`);
+    return `fee ${parts.join(" + ")}`;
+  }
   function timeAgo(timestamp) {
     if (!timestamp)
       return "never";
@@ -1607,8 +1846,9 @@ coin:
       }
       const depositDelayed = info.chains.some((chain) => chain.depositDelayed);
       const withdrawDelayed = info.chains.some((chain) => chain.withdrawDelayed);
-      setChip(depChip, info.deposit, depositDelayed);
-      setChip(wdChip, info.withdraw, withdrawDelayed);
+      const unknown = info.needsLogin && info.chains.length === 0;
+      setChip(depChip, unknown ? null : info.deposit, depositDelayed);
+      setChip(wdChip, unknown ? null : info.withdraw, withdrawDelayed);
       chainsEl.textContent = "";
       if (options.getConfig().showChains && info.chains.length) {
         for (const chain of info.chains) {
@@ -1629,9 +1869,35 @@ coin:
           wd.className = chain.withdraw ? "yes" : "no";
           wd.title = chain.withdraw ? "withdraw enabled" : "withdraw disabled";
           flags.append(dep, wd);
+          const details = [
+            chain.deposit ? "deposit enabled" : "deposit disabled",
+            chain.withdraw ? "withdraw enabled" : "withdraw disabled"
+          ];
+          if (chain.fee != null)
+            details.push(`fee ${formatCoin(chain.fee)} ${coin}`);
+          if (chain.feePercent)
+            details.push(`+ ${formatCoin(chain.feePercent)}%`);
+          if (chain.minWithdraw != null)
+            details.push(`min ${formatCoin(chain.minWithdraw)} ${coin}`);
+          if (chain.maxWithdraw != null)
+            details.push(`max ${formatCoin(chain.maxWithdraw)} ${coin}`);
+          row.title = `${chain.name} · ${details.join(" · ")}`;
           row.append(name, flags);
+          if (!info.needsLogin && (chain.fee != null || chain.feePercent != null)) {
+            const fee = document.createElement("span");
+            fee.className = "fee";
+            fee.textContent = feeLabel(chain, coin, info.priceUsdt, currentRate().rate);
+            row.append(fee);
+          }
           chainsEl.append(row);
         }
+      }
+      if (info.needsLogin) {
+        const hint = document.createElement("div");
+        hint.className = "chain hint";
+        hint.textContent = "Log in to load network fees";
+        hint.title = "Networks and fees come from the exchange session; the orderbook keeps working without it.";
+        chainsEl.append(hint);
       }
       const rate = currentRate();
       const rateText = rate.rate ? ` · 1 USDT = ${formatIdr(rate.rate, { mode: "full" })}` : "";
@@ -1740,7 +2006,7 @@ coin:
   }
 
   // src/main.ts
-  function num(key, fallback) {
+  function num2(key, fallback) {
     const raw = getStored(key, fallback);
     const value = Number(raw);
     return Number.isFinite(value) ? value : fallback;
@@ -1841,9 +2107,9 @@ coin:
     const panel = panelConfig().enabled ? mountPanel({ site, getConfig: panelConfig }) : null;
     onRateChange(() => orderbook.rescan());
     getUsdtIdrRate({
-      ttlHours: num("idr.ttlHours", 6),
+      ttlHours: num2("idr.ttlHours", 6),
       enableNetwork: bool("idr.enableNetworkRate", false),
-      fallbackRate: num("idr.fallbackRate", 18000)
+      fallbackRate: num2("idr.fallbackRate", 18000)
     }).then((snapshot) => {
       log(`site=${site} rate=${snapshot.rate} (${snapshot.source})`);
     });

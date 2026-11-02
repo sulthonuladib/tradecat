@@ -9,6 +9,7 @@ ScriptCat userscripts that make USDT orderbooks readable in rupiah.
 | IDR price appended to the right of every orderbook price | orderbook, both sides |
 | `Total (USDT)` replaced with the **IDR volume** | orderbook |
 | Deposit / withdraw enabled state, per chain, with chain list | floating panel |
+| Withdrawal **fee in coin + rupiah**, min/max withdraw | floating panel |
 | Quick **Deposit** / **Withdraw** buttons for the current coin | floating panel |
 | USDT → IDR rate read from shared storage (a separate script can keep it fresh) | storage |
 
@@ -69,6 +70,22 @@ Console helpers: `TradeCat.describe()`, `TradeCat.rescan()`, `TradeCat.rate()`,
 `TradeCat.setRate(18085)`.
 
 ---
+
+## Where the deposit / withdraw data comes from
+
+Both exchanges hide this behind a **logged-in, same-origin** endpoint, not the
+public API (which is why MEXC previously returned nothing):
+
+| Exchange | Endpoint | Gives |
+| --- | --- | --- |
+| gate | `GET /wallet/currency_chains?currency=COIN` (public) | chain list, deposit/withdraw flags, min withdraw |
+| gate | `POST /json_svr/query?u=116` (`type=getWithdrawChainsInfo`, `Csrftoken`) | per-chain `withdraw_txfee`, `rate_usdt` |
+| MEXC | `GET /api/platform/asset/api/asset/spot/currency/v3?currency=COIN` | `data.chains[]` (`chainName`, `enableDeposit`, `enableWithdraw`, `withdrawFee`, `withdrawMin`), `data.currencyPrice` |
+
+The fee is shown as `fee 0,0005 BTC ≈ Rp 712.250`:
+`fee × priceUsdt × USDT/IDR rate`. If the fee endpoint needs a login, the panel
+still lists networks and status and says so; the chips go neutral instead of
+claiming green. Results are cached for 10 minutes under `coininfo.v2.*`.
 
 ## The rate contract (promise based)
 

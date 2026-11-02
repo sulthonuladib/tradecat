@@ -99,7 +99,7 @@ ScriptCat dashboard → **Scripts** → `TradeCat · IDR Orderbook` → **Settin
 | `idr.ttlHours` | `6` | rate cache lifetime |
 | `idr.enableNetworkRate` | off | let this script fetch the rate itself |
 | `coin.panel` | on | show the deposit/withdraw panel |
-| `coin.showChains` | on | show per-chain `D✓ W✗` flags |
+| `coin.showChains` | on | show per-chain `D✓ W✗` flags, withdrawal fee and limits |
 | `coin.position` | `bottom-left` | panel anchor (it is also draggable) |
 
 Set the rate by hand at any time (works immediately, no reload):
@@ -109,6 +109,11 @@ TradeCat.setRate(18085)          // from the DevTools console
 ```
 
 ## 5. The rate updater
+
+The panel reads network status and withdrawal fees from the exchange session:
+gate uses `wallet/currency_chains` + `/json_svr/query?u=116`, MEXC uses
+`/api/platform/asset/api/asset/spot/currency/v3`. **Log in on the exchange** to
+see fees; without a session the panel still shows the networks and their status.
 
 `TradeCat · USDT/IDR Rate Updater` runs as a ScriptCat background + crontab
 script: `*/15 * * * *` (every 15 minutes). It reads

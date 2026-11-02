@@ -17,7 +17,14 @@ const server = Bun.serve({
   port: 0,
   hostname: '127.0.0.1',
   fetch(request) {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const fixture = url.searchParams.get('fixture');
+    if (fixture) {
+      return new Response(readFileSync(join(fixtures, `${fixture}.html`)), {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
     // mimic /trade/BTC_USDT so the coin panel can resolve a pair
     if (path.startsWith('/trade/') || path.startsWith('/exchange/')) {
       return new Response(readFileSync(join(fixtures, 'gate.html')), {
@@ -183,6 +190,33 @@ async function main() {
     expectContains(html, idr(78.05), 'total 78.05 -> IDR');
     expectContains(html, idr(195120), 'total 195.12k -> IDR');
     expectCount(html, 'tc-idr-price', 3, 'one badge per row');
+  }
+
+  console.log('gate chain fees (public chains + logged-in json_svr fees)');
+  {
+    const html = await dumpDom(`/trade/BTC_USDT?fixture=coininfo-gate&site=gate`);
+    expectContains(html, '712.250', 'BTC fee 0,0005 * 77000 USDT * 18500');
+    expectContains(html, '284.900', 'BSC fee 0,0002 -> IDR');
+    expectContains(html, 'D✓', 'deposit flag rendered');
+    expectContains(html, 'W✗', 'disabled BSC withdrawal rendered');
+    expectContains(html, 'min 0,0005 BTC', 'min withdraw in the tooltip');
+    expectNotContains(html, 'Log in to load network fees', 'no login hint when the session works');
+
+    const login = await dumpDom(`/trade/BTC_USDT?fixture=coininfo-gate&site=gate&mode=login`);
+    expectContains(login, 'Log in to load network fees', 'gate shows the login hint');
+    expectContains(login, 'D✓', 'chain status still rendered without fees');
+  }
+
+  console.log('mexc chain fees (same-origin currency/v3)');
+  {
+    const html = await dumpDom(`/exchange/BTC_USDT?fixture=coininfo-mexc&site=mexc`);
+    expectContains(html, '712.250', 'BTC fee -> IDR');
+    expectContains(html, '1.424.500.000', 'TRX fee 1 * 77000 USDT * 18500');
+    expectContains(html, 'min 0,001 BTC', 'min withdraw in the tooltip');
+    expectNotContains(html, 'Log in to load network fees', 'no login hint when the session works');
+
+    const login = await dumpDom(`/exchange/BTC_USDT?fixture=coininfo-mexc&site=mexc&mode=login`);
+    expectContains(login, 'Log in to load network fees', 'mexc shows the login hint');
   }
 
   console.log('coin panel host is mounted on a pair page');

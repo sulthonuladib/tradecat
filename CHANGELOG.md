@@ -3,6 +3,30 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.2
+
+- **MEXC deposit/withdraw data actually works now.** The panel was calling a
+  signed API (`/api/v3/capital/config/getall`) and a `.com` URL that always
+  failed. It now uses the same-origin, session-authenticated endpoint from the
+  reference scripts:
+  `/api/platform/asset/api/asset/spot/currency/v3?currency=COIN`
+  (`data.chains[].chainName / enableDeposit / enableWithdraw / withdrawFee /
+  withdrawMin`, plus `data.currencyPrice`).
+- **Gate earns fees too.** Chain status/minimum come from the public
+  `wallet/currency_chains`; per-chain `withdraw_txfee` and `rate_usdt` come from
+  the session `POST /json_svr/query?u=116` (`Csrftoken` header), merged by chain.
+- **Panel shows the withdrawal fee in coin units and rupiah**
+  (`fee 0,0005 BTC ≈ 712.250`), with min/max withdrawal in the row tooltip.
+  Fees need a login; without one the panel still lists networks and status and
+  shows a "Log in to load network fees" hint (chips become unknown instead of a
+  false green). New cache namespace `coininfo.v2`.
+- **No more blinking volume column.** The exchange's Total text is kept in the
+  DOM but made transparent, and the IDR volume is drawn in the same overlay
+  layer as the price, so React/gate can re-render underneath without flashing.
+  `bun run live --samples 20` reports stable coverage (gate 20/20, MEXC 18/18).
+- Tests: 51 unit + 72 DOM checks, including real-shaped gate/MEXC chain payloads,
+  fee→IDR conversion, login-required hints and overlay alignment.
+
 ## 0.3.1
 
 - **Reference-style overlay rendering.** The IDR price is no longer injected

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>gate coin info fixture</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var login = params.get('mode') === 'login';
+    window.__GM__ = {
+      'idr.rate': 18500,
+      'idr.updatedAt': Date.now(),
+      'idr.source': 'fixture'
+    };
+    window.GM_getValue = function (key, fallback) {
+      return Object.prototype.hasOwnProperty.call(window.__GM__, key) ? window.__GM__[key] : fallback;
+    };
+    window.GM_setValue = function (key, value) { window.__GM__[key] = value; };
+    window.GM_registerMenuCommand = function () {};
+    window.GM_notification = function () {};
+    window.GM_xmlhttpRequest = function (details) {
+      setTimeout(function () {
+        if (details.url.indexOf('wallet/currency_chains') >= 0) {
+          details.onload({
+            status: 200,
+            responseText: JSON.stringify([
+              { chain: 'BTC', name_en: 'Bitcoin', is_disabled: 0, is_deposit_disabled: 0, is_withdraw_disabled: 0, withdraw_amount_min: '0.0005' },
+              { chain: 'BSC', name_en: 'BNB Smart Chain(BEP20)', is_disabled: 0, is_deposit_disabled: 0, is_withdraw_disabled: 1, withdraw_amount_min: '0.0005' }
+            ])
+          });
+        } else if (details.url.indexOf('spot/tickers') >= 0) {
+          details.onload({ status: 200, responseText: JSON.stringify([{ currency_pair: 'BTC_USDT', last: '77000' }]) });
+        } else {
+          details.onerror(new Error('offline'));
+        }
+      }, 5);
+    };
+    var realFetch = window.fetch;
+    window.fetch = function (url, init) {
+      if (String(url).indexOf('/json_svr/query') >= 0) {
+        var body = login
+          ? { resMsg: { code: 1000, message: 'Please login first' }, datas: [] }
+          : { datas: { rate_usdt: '77000', chains: [{ chain: 'BTC', withdraw_txfee: '0.0005' }, { chain: 'BSC', withdraw_txfee: '0.0002' }] } };
+        return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      return realFetch(url, init);
+    };
+    window.__TRADECAT_SITE__ = 'gate';
+  })();
+</script>
+<style>
+  body { background: #0b0e11; color: #eaecef; font: 12px/1.6 ui-sans-serif, sans-serif; }
+</style>
+</head>
+<body>
+<div class="ob">
+  <div class="head"><div>Price (USDT)</div><div>Amount (BTC)</div><div>Total (USDT)</div></div>
+  <div class="rows">
+    <div class="row"><div><span>77,000.0</span></div><div><span>0.001000</span></div><div><span>77.00</span></div></div>
+    <div class="row"><div><span>76,999.0</span></div><div><span>0.002000</span></div><div><span>154.00</span></div></div>
+  </div>
+</div>
+<script src="/dist/tradecat-idr.user.js"></script>
+
+<script>
+  // Shadow DOM is not serialised by --dump-dom, so mirror what the panel shows.
+  setTimeout(function () {
+    var host = document.getElementById('tradecat-panel-host');
+    var root = host && host.shadowRoot;
+    var chains = root ? [].slice.call(root.querySelectorAll('.chain:not(.hint)')).map(function (row) {
+      return (row.getAttribute('title') || '') + ' || ' + (row.textContent || '').replace(/\s+/g, ' ').trim();
+    }) : [];
+    var hint = root ? root.querySelector('.chain.hint') : null;
+    document.documentElement.setAttribute('data-tc-panel', JSON.stringify({ chains: chains, hint: hint ? hint.textContent : null }));
+  }, 3000);
+</script>
+</body>
+</html>

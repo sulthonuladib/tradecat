@@ -6,7 +6,7 @@
  */
 import { getStored, setStored } from './store';
 import { depositUrl, withdrawUrl, currentPair, type SiteId } from './site';
-import { getCoinInfo, type CoinInfo } from './coininfo';
+import { getCoinInfo, type ChainInfo, type CoinInfo } from './coininfo';
 import { currentRate } from './rate';
 import { formatIdr } from './format';
 
@@ -71,16 +71,21 @@ const CSS = `
 .chip.ok { color: #c9d1d9; } .chip.ok i { background: #2ea043; } .chip.ok b { color: #3fb950; }
 .chip.bad { color: #c9d1d9; } .chip.bad i { background: #f85149; } .chip.bad b { color: #f85149; }
 .chip.warn i { background: #d29922; } .chip.warn b { color: #d29922; }
-.chains { display: flex; flex-direction: column; gap: 2px; max-height: 132px; overflow-y: auto; }
+.chains { display: flex; flex-direction: column; gap: 2px; max-height: 168px; overflow-y: auto; }
 .chain {
-  display: flex; align-items: center; gap: 6px; font-size: 11px;
-  padding: 2px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.03);
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0 6px;
+  font-size: 11px; padding: 3px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.03);
 }
 .chain .name { color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chain .flags { margin-left: auto; display: flex; gap: 6px; font-variant-numeric: tabular-nums; }
+.chain .flags { display: flex; gap: 6px; font-variant-numeric: tabular-nums; }
 .chain .flags span { color: #6e7681; }
 .chain .flags span.yes { color: #3fb950; }
 .chain .flags span.no { color: #f85149; }
+.chain .fee {
+  grid-column: 1 / -1; font-size: 10px; color: #ead05a;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chain.hint { display: block; color: #d29922; font-size: 10px; background: none; padding: 2px 4px; }
 .actions { display: flex; gap: 6px; }
 .btn {
   all: unset; flex: 1; text-align: center; cursor: pointer;
@@ -94,6 +99,25 @@ const CSS = `
 .foot { font-size: 10px; color: #6e7681; display: flex; gap: 6px; align-items: center; }
 .foot .retry { all: unset; cursor: pointer; color: #58a6ff; }
 `;
+
+function formatCoin(value: number): string {
+  return value.toLocaleString('id-ID', { maximumFractionDigits: 8 });
+}
+
+/** "fee 0,0005 BTC ≈ Rp 89.000" (+ percent when the exchange charges one). */
+function feeLabel(chain: ChainInfo, coin: string, priceUsdt: number | null, usdtIdr: number): string {
+  const parts: string[] = [];
+  if (chain.fee != null) {
+    const coinAmount = `${formatCoin(chain.fee)} ${coin}`;
+    if (priceUsdt && usdtIdr) {
+      parts.push(`${coinAmount} ≈ ${formatIdr(chain.fee * priceUsdt * usdtIdr)}`);
+    } else {
+      parts.push(coinAmount);
+    }
+  }
+  if (chain.feePercent) parts.push(`${formatCoin(chain.feePercent)}%`);
+  return `fee ${parts.join(' + ')}`;
+}
 
 function timeAgo(timestamp: number): string {
   if (!timestamp) return 'never';
@@ -212,8 +236,11 @@ export function mountPanel(options: { site: SiteId; getConfig: () => PanelConfig
 
     const depositDelayed = info.chains.some((chain) => chain.depositDelayed);
     const withdrawDelayed = info.chains.some((chain) => chain.withdrawDelayed);
-    setChip(depChip, info.deposit, depositDelayed);
-    setChip(wdChip, info.withdraw, withdrawDelayed);
+    // With no chains and no session we genuinely do not know - show the chips
+    // as unknown instead of a confident green.
+    const unknown = info.needsLogin && info.chains.length === 0;
+    setChip(depChip, unknown ? null : info.deposit, depositDelayed);
+    setChip(wdChip, unknown ? null : info.withdraw, withdrawDelayed);
 
     chainsEl.textContent = '';
     if (options.getConfig().showChains && info.chains.length) {
@@ -238,9 +265,35 @@ export function mountPanel(options: { site: SiteId; getConfig: () => PanelConfig
         wd.title = chain.withdraw ? 'withdraw enabled' : 'withdraw disabled';
         flags.append(dep, wd);
 
+        const details = [
+          chain.deposit ? 'deposit enabled' : 'deposit disabled',
+          chain.withdraw ? 'withdraw enabled' : 'withdraw disabled',
+        ];
+        if (chain.fee != null) details.push(`fee ${formatCoin(chain.fee)} ${coin}`);
+        if (chain.feePercent) details.push(`+ ${formatCoin(chain.feePercent)}%`);
+        if (chain.minWithdraw != null) details.push(`min ${formatCoin(chain.minWithdraw)} ${coin}`);
+        if (chain.maxWithdraw != null) details.push(`max ${formatCoin(chain.maxWithdraw)} ${coin}`);
+        row.title = `${chain.name} · ${details.join(' · ')}`;
+
         row.append(name, flags);
+
+        if (!info.needsLogin && (chain.fee != null || chain.feePercent != null)) {
+          const fee = document.createElement('span');
+          fee.className = 'fee';
+          fee.textContent = feeLabel(chain, coin, info.priceUsdt, currentRate().rate);
+          row.append(fee);
+        }
+
         chainsEl.append(row);
       }
+    }
+
+    if (info.needsLogin) {
+      const hint = document.createElement('div');
+      hint.className = 'chain hint';
+      hint.textContent = 'Log in to load network fees';
+      hint.title = 'Networks and fees come from the exchange session; the orderbook keeps working without it.';
+      chainsEl.append(hint);
     }
 
     const rate = currentRate();

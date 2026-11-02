@@ -21,7 +21,7 @@ const DEFAULT_BUNDLE = join(import.meta.dir, '..', 'dist', 'tradecat-idr.user.js
 /** @param {string[]} argv */
 function parseArgs(argv) {
   const urls = [];
-  const flags = { bundle: DEFAULT_BUNDLE, shot: null, wait: 18000, settle: 6000, json: false };
+  const flags = { bundle: DEFAULT_BUNDLE, shot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150 };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
@@ -29,6 +29,8 @@ function parseArgs(argv) {
     else if (arg === '--shot') flags.shot = argv[++i];
     else if (arg === '--wait') flags.wait = Number(argv[++i]);
     else if (arg === '--settle') flags.settle = Number(argv[++i]);
+    else if (arg === '--samples') flags.samples = Math.max(1, Number(argv[++i]));
+    else if (arg === '--interval') flags.interval = Math.max(50, Number(argv[++i]));
     else if (arg.startsWith('-')) throw new Error(`unknown flag ${arg}`);
     else urls.push(arg);
   }
@@ -44,7 +46,8 @@ const REPORT = `(() => {
   const parse = (s) => Number(String(s).replace(/[^\\d.]/g, ''));
   const rows = [...document.querySelectorAll('[class*="depth-list-item"], [class*="orderbookItem"]')];
   const badges = [...document.querySelectorAll('.tc-idr-price')].filter((b) => b.isConnected);
-  let covered = 0, stale = 0, unconverted = 0, maxDy = 0;
+  const volumes = [...document.querySelectorAll('.tc-idr-volume')].filter((b) => b.isConnected && b.getBoundingClientRect().width > 0);
+  let covered = 0, stale = 0, unconverted = 0, maxDy = 0, volumeRows = 0;
 
   for (const row of rows) {
     const rr = row.getBoundingClientRect();
@@ -66,9 +69,29 @@ const REPORT = `(() => {
     const title = Number((badge.getAttribute('title') || '').replace(/\\./g, ''));
     if (price && rate && Math.abs(title - price * rate) > Math.max(1, price * rate * 1e-4)) stale += 1;
 
+    // A volume badge must cover this row's total cell. The exchange's own total
+    // text stays in the DOM (invisible) so it can re-render without flashing.
     const totalCell = cells.find((c) => /total/i.test(c.className)) || cells[cells.length - 1];
-    if (totalCell && !totalCell.querySelector('[data-tc-orig]')) unconverted += 1;
+    const tr = totalCell ? totalCell.getBoundingClientRect() : null;
+    const volumeBadge = tr && volumes.find((b) => {
+      const br = b.getBoundingClientRect();
+      return (
+        Math.abs(br.top + br.height / 2 - (tr.top + tr.height / 2)) <= tr.height &&
+        br.right >= tr.left &&
+        br.left <= tr.right
+      );
+    });
+    if (volumeBadge) volumeRows += 1;
+    else unconverted += 1;
   }
+
+  const panelHosts = [...document.querySelectorAll('#tradecat-panel-host, tradecat-panel-host')];
+  const panelHost = panelHosts[0] || null;
+  const panelRoot = panelHost && panelHost.shadowRoot;
+  const panelBody = panelRoot ? panelRoot.querySelector('.body') : null;
+  const panelText = panelBody ? (panelBody.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500) : null;
+  const panelChains = panelRoot ? panelRoot.querySelectorAll('.chain:not(.hint)').length : 0;
+  const panelHint = panelRoot ? (panelRoot.querySelector('.chain.hint')?.textContent || null) : null;
 
   return {
     rows: rows.length,
@@ -77,8 +100,15 @@ const REPORT = `(() => {
     stale,
     unconverted,
     maxDy,
+    volumes: volumes.length,
+    volumeRows,
     adapter: describe && describe.adapter,
     described: describe && describe.rows,
+    panel: panelText,
+    panelChains,
+    panelHint,
+    panelHosts: panelHosts.length,
+    tradeCat: !!globalThis.TradeCat,
     sample: describe && describe.sample,
   };
 })()`;
@@ -169,7 +199,16 @@ async function openPage(url, flags) {
   await evaluate(`${bundle}\n;1`);
   await sleep(flags.settle);
 
-  const report = await evaluate(REPORT);
+  const samples = [];
+  for (let i = 0; i < flags.samples; i += 1) {
+    if (i > 0) await sleep(flags.interval);
+    samples.push(await evaluate(REPORT));
+  }
+  const report = samples[samples.length - 1];
+  report.samples = samples.length;
+  report.minCovered = Math.min(...samples.map((s) => s.covered));
+  report.minVolumes = Math.min(...samples.map((s) => s.volumes));
+  report.maxVolumes = Math.max(...samples.map((s) => s.volumes));
   let screenshot = null;
   if (flags.shot) {
     const area = await evaluate(AREA);
@@ -192,7 +231,7 @@ async function openPage(url, flags) {
 
 const { urls, flags } = parseArgs(process.argv.slice(2));
 if (urls.length === 0) {
-  console.error('usage: bun run live <url> [url...] [--shot file.png] [--json] [--bundle file]');
+  console.error('usage: bun run live <url> [url...] [--shot file.png] [--json] [--bundle file] [--samples N]');
   process.exit(1);
 }
 
@@ -207,9 +246,14 @@ for (const url of urls) {
       console.log(`  ${report.title}`);
       console.log(
         `  adapter=${report.adapter} rows=${report.rows} badges=${report.badges} covered=${report.covered}` +
-          ` stale=${report.stale} unconverted=${report.unconverted} maxDy=${report.maxDy}px`,
+          ` stale=${report.stale} unconverted=${report.unconverted} maxDy=${report.maxDy}px` +
+          ` volumes=${report.volumes} (min ${report.minVolumes}/${report.maxVolumes}, rows ${report.volumeRows})`,
       );
       if (report.sample?.length) console.log(`  sample: ${report.sample[0]}`);
+      if (report.panel !== null) {
+        console.log(`  panel: chains=${report.panelChains} hint=${report.panelHint ? `"${report.panelHint}"` : '-'}`);
+        console.log(`  panel text: ${report.panel}`);
+      }
       if (report.screenshot) console.log(`  screenshot: ${report.screenshot}`);
     }
     if (report.rows === 0 || report.covered === 0) failed = true;

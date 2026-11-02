@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mexc coin info fixture</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var login = params.get('mode') === 'login';
+    window.__GM__ = {
+      'idr.rate': 18500,
+      'idr.updatedAt': Date.now(),
+      'idr.source': 'fixture'
+    };
+    window.GM_getValue = function (key, fallback) {
+      return Object.prototype.hasOwnProperty.call(window.__GM__, key) ? window.__GM__[key] : fallback;
+    };
+    window.GM_setValue = function (key, value) { window.__GM__[key] = value; };
+    window.GM_registerMenuCommand = function () {};
+    window.GM_notification = function () {};
+    window.GM_xmlhttpRequest = function (details) { details.onerror(new Error('offline')); };
+    var realFetch = window.fetch;
+    window.fetch = function (url, init) {
+      if (String(url).indexOf('/api/platform/asset/api/asset/spot/currency/v3') >= 0) {
+        var body = login
+          ? { code: 401, msg: 'User not log in.' }
+          : {
+              code: 0,
+              data: {
+                currencyPrice: '77000',
+                chains: [
+                  { chainName: 'BTC', enableDeposit: true, enableWithdraw: true, withdrawFee: '0.0005', withdrawMin: '0.001' },
+                  { chainName: 'TRX', enableDeposit: true, enableWithdraw: true, withdrawFee: '1', withdrawMin: '1' }
+                ]
+              }
+            };
+        return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      return realFetch(url, init);
+    };
+    window.__TRADECAT_SITE__ = 'mexc';
+  })();
+</script>
+<style>
+  body { background: #121212; color: #eaecef; font: 12px/1.6 ui-sans-serif, sans-serif; }
+</style>
+</head>
+<body>
+<table class="book">
+  <thead><tr><th>Price (USDT)</th><th>Amount (BTC)</th><th>Total (USDT)</th></tr></thead>
+  <tbody class="asks">
+    <tr><td><span>77,000.00</span></td><td><span>0.00100000</span></td><td><span>77.00</span></td></tr>
+    <tr><td><span>76,999.00</span></td><td><span>0.00200000</span></td><td><span>153.99</span></td></tr>
+  </tbody>
+</table>
+<script src="/dist/tradecat-idr.user.js"></script>
+
+<script>
+  // Shadow DOM is not serialised by --dump-dom, so mirror what the panel shows.
+  setTimeout(function () {
+    var host = document.getElementById('tradecat-panel-host');
+    var root = host && host.shadowRoot;
+    var chains = root ? [].slice.call(root.querySelectorAll('.chain:not(.hint)')).map(function (row) {
+      return (row.getAttribute('title') || '') + ' || ' + (row.textContent || '').replace(/\s+/g, ' ').trim();
+    }) : [];
+    var hint = root ? root.querySelector('.chain.hint') : null;
+    document.documentElement.setAttribute('data-tc-panel', JSON.stringify({ chains: chains, hint: hint ? hint.textContent : null }));
+  }, 3000);
+</script>
+</body>
+</html>
