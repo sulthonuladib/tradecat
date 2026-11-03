@@ -115,8 +115,8 @@ gate uses `wallet/currency_chains` + `/json_svr/query?u=116`, MEXC uses
 `/api/platform/asset/api/asset/spot/currency/v3`. **Log in on the exchange** to
 see fees; without a session the panel still shows the networks and their status.
 
-`TradeCat · USDT/IDR Rate Updater` runs as a ScriptCat background + crontab
-script: `*/15 * * * *` (every 15 minutes). It reads
+`TradeCat · USDT/IDR Rate Updater` runs as a ScriptCat crontab script
+(`@crontab */15 * * * *`) (every 15 minutes). It reads
 <https://indodax.com/api/ticker/usdtidr> (`ticker.last`) first, falls back to
 CoinGecko, and writes the result to the shared `tradecat` storage.
 

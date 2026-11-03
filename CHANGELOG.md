@@ -3,6 +3,14 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.9
+
+- **Updater metadata: only `@crontab`, no `@background`.** `@crontab` already
+  declares a scheduled background script; adding `@background` made ScriptCat
+  treat it as a continuously-running background script, which conflicts with the
+  "run every 15 minutes, then finish" lifecycle (and with the ▶ button). One
+  directive is enough.
+
 ## 0.3.8
 
 - **Rate updater now follows ScriptCat's background-script contract.** A
