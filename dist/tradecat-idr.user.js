@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.9
+// @version      0.3.10
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       sulthonuladib
 // @license      MIT
@@ -65,9 +65,9 @@ idr:
     default: "#ead05a"
   volumeColor:
     title: IDR volume colour
-    description: Colour of the converted Total column. Leave empty to inherit the cell colour.
+    description: Colour of the converted Total column. Defaults to the same gold as the price; leave empty to inherit the cell colour.
     type: text
-    default: ""
+    default: "#ead05a"
   fit:
     title: Shrink numbers that do not fit
     description: When the full IDR number is wider than the orderbook cell, switch to compact (1,44 M) instead of letting it get clipped. The full value stays in the tooltip.
@@ -529,6 +529,10 @@ coin:
     const abs = Math.abs(value);
     if (abs === 0)
       return `${prefix}0`;
+    if (mode === "full" && options.precision === "price" && abs >= 1) {
+      const digits = abs < 10 ? 3 : 2;
+      return prefix + idNum(value, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    }
     if (abs < 1) {
       if (mode === "compact") {
         const decimals = Math.min(12, Math.max(2, 1 - Math.floor(Math.log10(abs))));
@@ -1031,12 +1035,11 @@ coin:
     textWidthCache.set(el, { text, width });
     return width;
   }
-  function choosePriceText(full, fullDecimals, compact, available, priceMetrics, fit) {
+  function choosePriceText(full, compact, available, priceMetrics, fit) {
     const tight = compact.replace(/\s+/g, "");
     if (!fit || !priceMetrics)
-      return { text: fullDecimals, fontEm: 1 };
+      return { text: full, fontEm: 1 };
     const tiers = [
-      { text: fullDecimals, em: 1 },
       { text: full, em: 1 },
       { text: compact, em: 1 },
       { text: tight, em: 1 },
@@ -1228,12 +1231,12 @@ coin:
       const price = parseNumber(priceText);
       if (config.showPrice && price != null && price > 0) {
         const idr = price * rate;
-        const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
-        const fullDecimals = formatIdr(idr, {
+        const full = formatIdr(idr, {
           prefix: config.prefix,
           mode: config.priceMode,
-          decimals: 2
+          precision: "price"
         });
+        const fullTitle = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
         const compact = formatIdr(idr, { prefix: config.prefix, mode: "compact" });
         const priceMetrics = metricsFor(row.priceCell);
         const amountText = row.amount ? siteText(row.amount.el) : null;
@@ -1245,13 +1248,13 @@ coin:
         const priceTextRight = priceRect.left + (priceMetrics?.paddingLeft ?? 0) + priceTextWidth;
         const amountTextLeft = amountRect && amountMetrics ? amountRect.right - amountMetrics.paddingRight - amountTextWidth : priceRect.right;
         const gap = 4;
-        const choice = choosePriceText(full, fullDecimals, compact, amountTextLeft - priceTextRight - gap, priceMetrics, config.fit);
+        const choice = choosePriceText(full, compact, amountTextLeft - priceTextRight - gap, priceMetrics, config.fit);
         prices.push({
           rowEl: row.row,
           host: hostOf(row),
           cell: row.priceCell,
           text: choice.text,
-          full,
+          full: fullTitle,
           fontPx: (priceMetrics?.fontPx ?? 12) * choice.fontEm,
           left: priceTextRight + gap
         });
@@ -2129,7 +2132,7 @@ coin:
       volumeMode: asMode(str("idr.volumeFormat", "full"), "full"),
       prefix: str("idr.prefix", ""),
       priceColor: str("idr.priceColor", "#ead05a"),
-      volumeColor: str("idr.volumeColor", ""),
+      volumeColor: str("idr.volumeColor", "#ead05a"),
       fit: bool("idr.fit", true)
     };
     cachedOrderbookConfigAt = now;

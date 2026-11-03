@@ -229,17 +229,15 @@ interface TextChoice {
  */
 function choosePriceText(
   full: string,
-  fullDecimals: string,
   compact: string,
   available: number,
   priceMetrics: CellMetrics | null,
   fit: boolean,
 ): TextChoice {
   const tight = compact.replace(/\s+/g, '');
-  if (!fit || !priceMetrics) return { text: fullDecimals, fontEm: 1 };
+  if (!fit || !priceMetrics) return { text: full, fontEm: 1 };
 
   const tiers: Array<{ text: string; em: number }> = [
-    { text: fullDecimals, em: 1 },
     { text: full, em: 1 },
     { text: compact, em: 1 },
     { text: tight, em: 1 },
@@ -491,12 +489,12 @@ function planRows(
 
     if (config.showPrice && price != null && price > 0) {
       const idr = price * rate;
-      const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
-      const fullDecimals = formatIdr(idr, {
+      const full = formatIdr(idr, {
         prefix: config.prefix,
         mode: config.priceMode,
-        decimals: 2,
+        precision: 'price',
       });
+      const fullTitle = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
       const compact = formatIdr(idr, { prefix: config.prefix, mode: 'compact' });
       const priceMetrics = metricsFor(row.priceCell);
       const amountText = row.amount ? siteText(row.amount.el) : null;
@@ -519,7 +517,6 @@ function planRows(
       const gap = 4;
       const choice = choosePriceText(
         full,
-        fullDecimals,
         compact,
         amountTextLeft - priceTextRight - gap,
         priceMetrics,
@@ -531,7 +528,7 @@ function planRows(
         host: hostOf(row),
         cell: row.priceCell,
         text: choice.text,
-        full,
+        full: fullTitle,
         fontPx: (priceMetrics?.fontPx ?? 12) * choice.fontEm,
         left: priceTextRight + gap,
       });

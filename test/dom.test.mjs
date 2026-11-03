@@ -172,6 +172,7 @@ async function main() {
     expectContains(html, '>77,650.10<', 'market trades price untouched');
     expectMatch(html, /data-tc-align="6\/6:[01]"/, 'overlay badge is aligned with every row');
     expectMatch(html, /data-tc-vol="6\/6:6"/, 'volume overlay covers every row and hides the exchange total');
+    expectMatch(html, /tc-idr-volume[^>]*(#ead05a|rgb\(234,\s*208,\s*90\))/i, 'volume defaults to the same gold');
   }
 
   console.log('tiny prices (0.000000123) and a 4-column row');

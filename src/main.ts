@@ -47,7 +47,7 @@ function orderbookConfig(): OrderbookConfig {
     volumeMode: asMode(str('idr.volumeFormat', 'full'), 'full'),
     prefix: str('idr.prefix', ''),
     priceColor: str('idr.priceColor', '#ead05a'),
-    volumeColor: str('idr.volumeColor', ''),
+    volumeColor: str('idr.volumeColor', '#ead05a'),
     fit: bool('idr.fit', true),
   };
   cachedOrderbookConfigAt = now;

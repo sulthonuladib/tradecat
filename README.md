@@ -56,7 +56,7 @@ command):
 | `idr.volumeFormat` | `full` | `full`, `compact`, or `auto` (compact when long) |
 | `idr.prefix` | `` (empty) | set to `Rp` if you want `Rp1.407.000.000` |
 | `idr.priceColor` | `#ead05a` | colour of the IDR price badge (empty = inherit the row's red/green) |
-| `idr.volumeColor` | *(empty)* | colour of the converted Total column (empty = inherit) |
+| `idr.volumeColor` | `#ead05a` | colour of the converted Total column (empty = inherit) |
 | `idr.fit` | `true` | degrade to compact (`1,44 M`) instead of clipping when the cell is too narrow |
 | `idr.showPrice` | `true` | show IDR next to the price |
 | `idr.convertTotal` | `true` | replace `Total (USDT)` with IDR volume |
@@ -167,8 +167,10 @@ panel width, row height or scroll position.
 
 The badge starts immediately after the price text (never right-aligned inside
 the cell, which could reach back over the USDT number) and the text is chosen
-from the real gap before the amount: full IDR with `,00`, full, then compact at
-the **same font size** (`1,41 M`), then a tight compact.
+from the real gap before the amount: full IDR, then compact at the **same font
+size** (`1,41 M`), then a tight compact. Full IDR keeps the price-style
+precision: every digit below 1 (`0,08698`), three decimals from 1 to 9
+(`4,334`), two decimals above (`21,40`, `40.649,58`), trailing zeros included.
 The full IDR value always stays in the `title` tooltip, and `idr.fit` turns the
 degradation off. Very narrow price cells fall back to the empty left side of the
 right-aligned amount column.

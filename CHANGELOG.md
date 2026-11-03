@@ -3,6 +3,18 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.10
+
+- **Full IDR price precision** (`precision: 'price'`): below 1 keeps every digit
+  (`0,08698`), 1–9 keeps three decimals (`4,334`, `1,000`), 10+ keeps two
+  (`21,40`, `40.649,58`, `18.023,04`). Trailing zeros are kept. Compact output is
+  unchanged. The tooltip keeps the plain full value without forced decimals.
+- **Volume is gold by default**, matching the price badge
+  (`idr.volumeColor` default `#ead05a`; empty still means inherit).
+- Verified no overlap after the wider numbers: gate ETH/USDC/PEPE and MEXC BTC
+  keep `maxOverlap -4px`, positive amount gaps, `font=1em`.
+- Tests: 54 unit + 77 DOM.
+
 ## 0.3.9
 
 - **Updater metadata: only `@crontab`, no `@background`.** `@crontab` already

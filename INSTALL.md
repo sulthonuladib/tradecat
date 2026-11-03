@@ -92,7 +92,7 @@ ScriptCat dashboard → **Scripts** → `TradeCat · IDR Orderbook` → **Settin
 | `idr.volumeFormat` | `full` | `full`, `compact`, `auto` |
 | `idr.prefix` | *(empty)* | set `Rp` for `Rp1.407.000.000` |
 | `idr.priceColor` | `#ead05a` | colour of the IDR price number (empty = inherit the row's red/green) |
-| `idr.volumeColor` | *(empty)* | colour of the converted Total column (empty = inherit) |
+| `idr.volumeColor` | `#ead05a` | colour of the converted Total column (empty = inherit) |
 | `idr.fit` | on | use compact text when the full number would clip |
 | `idr.showPrice` | on | IDR next to the price |
 | `idr.convertTotal` | on | replace `Total (USDT)` with IDR |

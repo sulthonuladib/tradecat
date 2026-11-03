@@ -142,6 +142,12 @@ export interface IdrFormatOptions {
   maxFullLength?: number;
   /** Force this many fraction digits on full IDR amounts (e.g. 2 -> 1.407.000,00). */
   decimals?: number;
+  /**
+   * Price style for the full format: below 1 keep every digit, 1–9 keep three
+   * decimals, 10+ keep two - always with trailing zeros (`4,334`, `21,40`).
+   * Ignored by the compact mode.
+   */
+  precision?: 'price';
 }
 
 const idNum = (value: number, options: Intl.NumberFormatOptions): string => {
@@ -181,6 +187,11 @@ export function formatIdr(value: number, options: IdrFormatOptions = {}): string
   const abs = Math.abs(value);
 
   if (abs === 0) return `${prefix}0`;
+
+  if (mode === 'full' && options.precision === 'price' && abs >= 1) {
+    const digits = abs < 10 ? 3 : 2;
+    return prefix + idNum(value, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
 
   if (abs < 1) {
     if (mode === 'compact') {

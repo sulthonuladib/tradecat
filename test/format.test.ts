@@ -65,6 +65,18 @@ describe('parseNumber', () => {
 });
 
 describe('formatIdr', () => {
+  test('price precision: full digits below 1, three 1-9, two above', () => {
+    expect(formatIdr(0.084312, { precision: 'price' })).toBe('0,084312');
+    expect(formatIdr(0.0022755, { precision: 'price' })).toBe('0,0022755');
+    expect(formatIdr(1, { precision: 'price' })).toBe('1,000');
+    expect(formatIdr(4.334, { precision: 'price' })).toBe('4,334');
+    expect(formatIdr(21.4, { precision: 'price' })).toBe('21,40');
+    expect(formatIdr(999.5, { precision: 'price' })).toBe('999,50');
+    expect(formatIdr(40649.58, { precision: 'price' })).toBe('40.649,58');
+    // compact mode is untouched
+    expect(formatIdr(1, { precision: 'price', mode: 'compact' })).toBe('1');
+  });
+
   test('decimals option keeps trailing ,00 on full amounts', () => {
     expect(formatIdr(40000, { decimals: 2 })).toBe('40.000,00');
     expect(formatIdr(40649.58, { decimals: 2 })).toBe('40.649,58');
