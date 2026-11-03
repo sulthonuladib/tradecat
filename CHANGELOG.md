@@ -3,6 +3,12 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.4
+
+- Metadata: `@author` is `sulthonuladib` instead of the `tradecat` placeholder
+  (both userscripts), and `package.json` carries the same author. No behaviour
+  change; the version bump is only so ScriptCat offers the metadata update.
+
 ## 0.3.3
 
 - **Gate volume blink is gone.** Hiding the exchange's Total text with an inline
