@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-rate-updater.user.js
-// @version      0.3.7
+// @version      0.3.8
 // @description  Periodically refresh the shared USDT → IDR rate (Indodax, then CoinGecko) that the TradeCat orderbook script reads from storage.
 // @author       sulthonuladib
 // @license      MIT
@@ -163,13 +163,17 @@
     }
     return null;
   }
-  (async () => {
-    const rate = await refresh();
-    if (rate === null)
-      log("no rate source returned a value - keeping the previous rate");
-    if (!isBackground) {
-      setInterval(() => void refresh(), 15 * 60 * 1000);
+  var done = refresh().then((rate) => {
+    if (rate === null) {
+      throw new Error("no rate source returned a value - keeping the previous rate");
     }
-  })();
+    return rate;
+  });
+  if (!isBackground) {
+    setInterval(() => {
+      refresh().catch((error) => log("rate refresh failed", error));
+    }, 15 * 60 * 1000);
+  }
+  return done;
 })();
 

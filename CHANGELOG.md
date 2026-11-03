@@ -3,6 +3,21 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.8
+
+- **Rate updater now follows ScriptCat's background-script contract.** A
+  background/crontab script must return a Promise that settles when the work is
+  done; the updater used a fire-and-forget async IIFE, so ScriptCat marked the
+  run as finished immediately. The dashboard sat at "Stopped" and the play
+  button appeared to do nothing while the fetch was still in flight.
+  The updater now returns that Promise and rejects when no rate source answers,
+  so the run shows "Running" until the request completes, the last-run time
+  updates, and failures are visible in the run log (next cron retries in 15 min).
+- Reminder: a `@crontab` script is *supposed* to sit at "Stopped" between runs;
+  the run-status column shows the next scheduled time on hover.
+- Tests unchanged (53 unit + 76 DOM); the updater fixture still verifies the
+  storage keys.
+
 ## 0.3.7
 
 - **IDR price now starts immediately after the USDT price.** Right-aligning the

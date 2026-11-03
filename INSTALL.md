@@ -122,7 +122,13 @@ CoinGecko, and writes the result to the shared `tradecat` storage.
 
 The orderbook script re-reads that storage every 30 seconds, so a fresh rate
 appears without touching the page. You can check it in the panel footer:
-`1 USDT = 18.085`.
+`1 USDT = Rp. 18.085`.
+
+A `@crontab` script sits at **Stopped** between runs - that is normal. The row
+shows the last run ("13 minutes ago") and, on hover, the next scheduled time.
+The ▶ button runs it once: it should show **Running** until the HTTP request
+finishes, then go back to Stopped. If pressing ▶ does nothing and the last-run
+time never changes, open the run log (click the run-status column) for the error.
 
 To refresh right away: ScriptCat dashboard → **Scripts** → click the run status
 of the updater (or wait for the cron tick). Background logs are visible in the
