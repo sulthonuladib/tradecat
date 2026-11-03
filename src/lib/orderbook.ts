@@ -61,7 +61,6 @@ function sanitizeColor(value: string | null | undefined): string {
 
 const LAYER = 'tc-idr-layer';
 const VOLUME_IDR = 'tc-idr-volume';
-type Placement = 'price' | 'amount' | 'span';
 type BadgeKind = 'price' | 'volume';
 
 const BADGE_BASE_STYLE = [
@@ -106,6 +105,7 @@ const LAYER_STYLE = [
 
 interface CellMetrics {
   contentWidth: number;
+  paddingLeft: number;
   paddingRight: number;
   fontPx: number;
   weight: string;
@@ -170,6 +170,7 @@ function metricsFor(cell: HTMLElement): CellMetrics | null {
 
   const metrics: CellMetrics = {
     contentWidth,
+    paddingLeft: parseFloat(style.paddingLeft) || 0,
     paddingRight: parseFloat(style.paddingRight) || 0,
     fontPx,
     weight: style.fontWeight || '400',
@@ -214,30 +215,28 @@ function elementTextWidth(el: HTMLElement, text: string, fallbackFont: string): 
 interface TextChoice {
   text: string;
   fontEm: number;
-  placement: Placement;
 }
 
 /**
- * Full IDR, compact IDR or tight compact - whichever fits beside the price.
+ * Full IDR, compact IDR or tight compact - whichever fits between the end of
+ * the price and the start of the (right-aligned) amount.
  *
- * Prices are left-aligned and amounts right-aligned, so the free space sits to
- * the right of the price (or the left of the amount). Compact stays at 1em:
- * `1,41 M` is readable where a shrunken `1.403.458.200` is not.
+ * The badge always *starts* right after the price, never right-aligned inside
+ * the cell: with a long IDR number a right-aligned badge can reach back over
+ * the USDT price, which is what happened on BTC/ETH. Starting after the price
+ * makes that impossible by construction; only the amount gap is at risk, and
+ * the text tiers keep the badge inside it. Compact stays at 1em.
  */
 function choosePriceText(
   full: string,
   fullDecimals: string,
   compact: string,
-  priceTextWidth: number,
+  available: number,
   priceMetrics: CellMetrics | null,
-  amountTextWidth: number,
-  amountMetrics: CellMetrics | null,
   fit: boolean,
 ): TextChoice {
   const tight = compact.replace(/\s+/g, '');
-  // Same size as the exchange price (1em), never a shrunken number unless the
-  // row is genuinely too narrow for every option below.
-  if (!fit || !priceMetrics) return { text: full, fontEm: 1, placement: 'price' };
+  if (!fit || !priceMetrics) return { text: fullDecimals, fontEm: 1 };
 
   const tiers: Array<{ text: string; em: number }> = [
     { text: fullDecimals, em: 1 },
@@ -248,30 +247,13 @@ function choosePriceText(
   ];
 
   const SAFETY = 4;
-  const priceFree = priceMetrics.contentWidth - priceTextWidth - 3;
-  const amountFree =
-    amountMetrics && amountTextWidth ? amountMetrics.contentWidth - amountTextWidth - 3 : 0;
-
   for (const tier of tiers) {
     const width = measureText(tier.text, fontFor(priceMetrics, tier.em)) + SAFETY;
-
-    // 1. Right-aligned inside the price cell.
-    if (width <= priceFree) return { text: tier.text, fontEm: tier.em, placement: 'price' };
-
-    // 2. Extend into the empty gap before the right-aligned amount text. Amounts
-    //    are right-aligned, so this space is visually free and keeps 1em.
-    if (amountFree > 0 && width <= priceFree + amountFree) {
-      return { text: tier.text, fontEm: tier.em, placement: 'span' };
-    }
-
-    // 3. Very narrow price cell: use the amount cell itself.
-    if (amountFree > 0 && width <= amountFree) {
-      return { text: tier.text, fontEm: tier.em, placement: 'amount' };
-    }
+    if (width <= available) return { text: tier.text, fontEm: tier.em };
   }
 
   const last = tiers[tiers.length - 1];
-  return { text: last?.text ?? tight, fontEm: last?.em ?? 0.85, placement: 'price' };
+  return { text: last?.text ?? tight, fontEm: last?.em ?? 0.85 };
 }
 
 /** Full IDR volume, degraded only when it would not fit the total cell. */
@@ -470,14 +452,8 @@ interface PriceWrite {
   text: string;
   full: string;
   fontPx: number;
-  placement: Placement;
-  textWidth: number;
-  /** Distance from the price cell's right edge to where the badge must end. */
-  rightInset: number;
-  /** For `span`: the amount cell whose left gap the badge may use. */
-  amountCell: HTMLElement | null;
-  /** For `span`: distance from the amount cell's right edge to its text. */
-  amountInset: number;
+  /** Viewport x where the badge starts (right after the USDT price). */
+  left: number;
 }
 
 interface VolumeWrite {
@@ -532,36 +508,32 @@ function planRows(
         amountMetrics && amountText && row.amount
           ? elementTextWidth(row.amount.el, amountText, fontFor(amountMetrics, 1))
           : 0;
+
+      const priceRect = row.priceCell.getBoundingClientRect();
+      const amountRect = row.amountCell ? row.amountCell.getBoundingClientRect() : null;
+      const priceTextRight = priceRect.left + (priceMetrics?.paddingLeft ?? 0) + priceTextWidth;
+      const amountTextLeft =
+        amountRect && amountMetrics
+          ? amountRect.right - amountMetrics.paddingRight - amountTextWidth
+          : priceRect.right;
+      const gap = 4;
       const choice = choosePriceText(
         full,
         fullDecimals,
         compact,
-        priceTextWidth,
+        amountTextLeft - priceTextRight - gap,
         priceMetrics,
-        amountTextWidth,
-        amountMetrics,
         config.fit,
       );
-      const cell = choice.placement === 'amount' && row.amountCell ? row.amountCell : row.priceCell;
-      const hostMetrics = choice.placement === 'amount' ? amountMetrics : priceMetrics;
 
       prices.push({
         rowEl: row.row,
         host: hostOf(row),
-        cell,
+        cell: row.priceCell,
         text: choice.text,
         full,
-        fontPx: (hostMetrics?.fontPx ?? 12) * choice.fontEm,
-        placement: choice.placement,
-        textWidth: hostMetrics
-          ? measureText(choice.text, fontFor(hostMetrics, choice.fontEm))
-          : choice.text.length * 7,
-        rightInset: (choice.placement === 'amount' ? 0 : priceMetrics?.paddingRight ?? 0) + 3,
-        amountCell: choice.placement === 'span' ? row.amountCell : null,
-        amountInset:
-          choice.placement === 'span' && amountMetrics
-            ? amountMetrics.paddingRight + amountTextWidth + 4
-            : 0,
+        fontPx: (priceMetrics?.fontPx ?? 12) * choice.fontEm,
+        left: priceTextRight + gap,
       });
     }
 
@@ -597,7 +569,6 @@ function styleFor(
   fontPx: number,
   color: string,
   opacity: string,
-  alignRight: boolean,
 ): string {
   return [
     ...BADGE_BASE_STYLE,
@@ -608,7 +579,6 @@ function styleFor(
     // px, not em: the badge lives in the overlay layer, whose font size is not
     // the price cell's. `1em` there rendered 11px against a 12px price.
     `font-size:${fontPx.toFixed(2)}px`,
-    alignRight ? 'transform:translateX(-100%)' : 'transform:none',
     `color:${color}`,
     `opacity:${opacity}`,
   ].join(';');
@@ -674,10 +644,6 @@ function applyOverlays(
   const pricePositions = pricePlaced.map((item) => ({
     ...item,
     cellRect: item.write.cell.getBoundingClientRect(),
-    amountRect:
-      item.write.placement === 'span' && item.write.amountCell
-        ? item.write.amountCell.getBoundingClientRect()
-        : null,
     layerRect: item.entry.layer.getBoundingClientRect(),
   }));
   const volumePositions = volumePlaced.map((item) => ({
@@ -688,31 +654,20 @@ function applyOverlays(
 
   // Pass 3: paint.
   const priceColor = sanitizeColor(config.priceColor);
-  for (const { write, badge, cellRect, amountRect, layerRect } of pricePositions) {
+  for (const { write, badge, cellRect, layerRect } of pricePositions) {
     if (cellRect.width <= 0 || cellRect.height <= 0) {
       badge.style.display = 'none';
       continue;
     }
-    // Anchor the badge by its right edge (translateX(-100%)). The rendered
-    // width can differ from the canvas estimate, and anchoring by the right
-    // keeps that difference on the free side instead of over the USDT price.
-    const alignRight = write.placement !== 'amount';
-    let left: number;
-    if (write.placement === 'price') {
-      left = cellRect.right - write.rightInset - layerRect.left;
-    } else if (write.placement === 'span' && amountRect) {
-      left = amountRect.right - write.amountInset - layerRect.left;
-    } else {
-      left = cellRect.left - layerRect.left + 2;
-    }
+    // Left-anchored right after the price text, so it can never reach back over
+    // the USDT price regardless of its rendered width.
     const style = styleFor(
-      left,
+      write.left - layerRect.left,
       cellRect.top - layerRect.top,
       cellRect.height,
       write.fontPx,
       priceColor || 'inherit',
       priceColor ? '1' : '0.75',
-      alignRight,
     );
     paint(badge, style, write.text, write.full);
   }
@@ -730,7 +685,6 @@ function applyOverlays(
       write.fontPx,
       write.color,
       '1',
-      false,
     );
     paint(badge, style, write.text, write.full);
   }

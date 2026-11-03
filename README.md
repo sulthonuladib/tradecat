@@ -165,8 +165,10 @@ does the same, but computes the position from each row's live geometry
 (`getBoundingClientRect`) instead of hardcoded pixel margins, so it adapts to any
 panel width, row height or scroll position.
 
-Numbers are chosen for readability: full IDR if it fits beside the price,
-otherwise compact at the **same font size** (`1,41 M`), then a tight compact.
+The badge starts immediately after the price text (never right-aligned inside
+the cell, which could reach back over the USDT number) and the text is chosen
+from the real gap before the amount: full IDR with `,00`, full, then compact at
+the **same font size** (`1,41 M`), then a tight compact.
 The full IDR value always stays in the `title` tooltip, and `idr.fit` turns the
 degradation off. Very narrow price cells fall back to the empty left side of the
 right-aligned amount column.

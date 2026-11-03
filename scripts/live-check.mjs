@@ -21,7 +21,7 @@ const DEFAULT_BUNDLE = join(import.meta.dir, '..', 'dist', 'tradecat-idr.user.js
 /** @param {string[]} argv */
 function parseArgs(argv) {
   const urls = [];
-  const flags = { bundle: DEFAULT_BUNDLE, shot: null, panelShot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150, evalFile: null };
+  const flags = { bundle: DEFAULT_BUNDLE, shot: null, panelShot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150, evalFile: null, width: 1440, height: 1000 };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
@@ -33,6 +33,8 @@ function parseArgs(argv) {
     else if (arg === '--samples') flags.samples = Math.max(1, Number(argv[++i]));
     else if (arg === '--interval') flags.interval = Math.max(50, Number(argv[++i]));
     else if (arg === '--eval-file') flags.evalFile = argv[++i];
+    else if (arg === '--width') flags.width = Number(argv[++i]);
+    else if (arg === '--height') flags.height = Number(argv[++i]);
     else if (arg.startsWith('-')) throw new Error(`unknown flag ${arg}`);
     else urls.push(arg);
   }
@@ -165,7 +167,7 @@ async function openPage(url, flags) {
       `--user-data-dir=${mkdtempSync(join(tmpdir(), 'tc-live-'))}`,
       '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
       '--lang=en-US,en',
-      '--window-size=1440,1000',
+      `--window-size=${flags.width},${flags.height}`,
       'about:blank',
     ],
     { stdout: 'ignore', stderr: 'ignore' },
@@ -213,7 +215,7 @@ async function openPage(url, flags) {
 
   await send('Page.enable');
   await send('Runtime.enable');
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await send('Emulation.setDeviceMetricsOverride', { width: flags.width, height: flags.height, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url });
   await sleep(flags.wait);
 

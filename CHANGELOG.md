@@ -3,6 +3,21 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.7
+
+- **IDR price now starts immediately after the USDT price.** Right-aligning the
+  badge inside the price cell meant a long IDR number could reach back over the
+  USDT price (BTC/ETH/PEPE, especially in a narrower panel). The badge is now
+  left-anchored at `price text right + 4px`, so overlap with the price is
+  impossible regardless of the number's width or the panel layout.
+- The text tier is chosen from the real gap between the price text and the
+  (right-aligned) amount text: `,00` full -> full -> compact -> tight. When the
+  gap is small the badge picks compact instead of spilling over the amount.
+- Verified with the real pages at 1024, 1440 and 1920 px: gate BTC/ETH/PEPE and
+  MEXC BTC all report `maxOverlap -4px` (the intended 4 px gap) and a positive
+  amount gap, `font=1em`.
+- `bun run live --width W --height H` makes layout checks reproducible.
+
 ## 0.3.6
 
 - **No more IDR/USDT overlap on high-priced coins (ETH, BTC, …).** The fit check

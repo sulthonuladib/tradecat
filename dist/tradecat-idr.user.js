@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.6
+// @version      0.3.7
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       sulthonuladib
 // @license      MIT
@@ -995,6 +995,7 @@ coin:
       return null;
     const metrics = {
       contentWidth,
+      paddingLeft: parseFloat(style.paddingLeft) || 0,
       paddingRight: parseFloat(style.paddingRight) || 0,
       fontPx,
       weight: style.fontWeight || "400",
@@ -1030,10 +1031,10 @@ coin:
     textWidthCache.set(el, { text, width });
     return width;
   }
-  function choosePriceText(full, fullDecimals, compact, priceTextWidth, priceMetrics, amountTextWidth, amountMetrics, fit) {
+  function choosePriceText(full, fullDecimals, compact, available, priceMetrics, fit) {
     const tight = compact.replace(/\s+/g, "");
     if (!fit || !priceMetrics)
-      return { text: full, fontEm: 1, placement: "price" };
+      return { text: fullDecimals, fontEm: 1 };
     const tiers = [
       { text: fullDecimals, em: 1 },
       { text: full, em: 1 },
@@ -1042,21 +1043,13 @@ coin:
       { text: tight, em: 0.85 }
     ];
     const SAFETY = 4;
-    const priceFree = priceMetrics.contentWidth - priceTextWidth - 3;
-    const amountFree = amountMetrics && amountTextWidth ? amountMetrics.contentWidth - amountTextWidth - 3 : 0;
     for (const tier of tiers) {
       const width = measureText(tier.text, fontFor(priceMetrics, tier.em)) + SAFETY;
-      if (width <= priceFree)
-        return { text: tier.text, fontEm: tier.em, placement: "price" };
-      if (amountFree > 0 && width <= priceFree + amountFree) {
-        return { text: tier.text, fontEm: tier.em, placement: "span" };
-      }
-      if (amountFree > 0 && width <= amountFree) {
-        return { text: tier.text, fontEm: tier.em, placement: "amount" };
-      }
+      if (width <= available)
+        return { text: tier.text, fontEm: tier.em };
     }
     const last = tiers[tiers.length - 1];
-    return { text: last?.text ?? tight, fontEm: last?.em ?? 0.85, placement: "price" };
+    return { text: last?.text ?? tight, fontEm: last?.em ?? 0.85 };
   }
   function chooseVolumeText(full, compact, metrics, fit) {
     if (!fit || !metrics)
@@ -1247,21 +1240,20 @@ coin:
         const amountMetrics = row.amountCell ? metricsFor(row.amountCell) : null;
         const priceTextWidth = priceMetrics ? elementTextWidth(row.price.el, priceText, fontFor(priceMetrics, 1)) : 0;
         const amountTextWidth = amountMetrics && amountText && row.amount ? elementTextWidth(row.amount.el, amountText, fontFor(amountMetrics, 1)) : 0;
-        const choice = choosePriceText(full, fullDecimals, compact, priceTextWidth, priceMetrics, amountTextWidth, amountMetrics, config.fit);
-        const cell = choice.placement === "amount" && row.amountCell ? row.amountCell : row.priceCell;
-        const hostMetrics = choice.placement === "amount" ? amountMetrics : priceMetrics;
+        const priceRect = row.priceCell.getBoundingClientRect();
+        const amountRect = row.amountCell ? row.amountCell.getBoundingClientRect() : null;
+        const priceTextRight = priceRect.left + (priceMetrics?.paddingLeft ?? 0) + priceTextWidth;
+        const amountTextLeft = amountRect && amountMetrics ? amountRect.right - amountMetrics.paddingRight - amountTextWidth : priceRect.right;
+        const gap = 4;
+        const choice = choosePriceText(full, fullDecimals, compact, amountTextLeft - priceTextRight - gap, priceMetrics, config.fit);
         prices.push({
           rowEl: row.row,
           host: hostOf(row),
-          cell,
+          cell: row.priceCell,
           text: choice.text,
           full,
-          fontPx: (hostMetrics?.fontPx ?? 12) * choice.fontEm,
-          placement: choice.placement,
-          textWidth: hostMetrics ? measureText(choice.text, fontFor(hostMetrics, choice.fontEm)) : choice.text.length * 7,
-          rightInset: (choice.placement === "amount" ? 0 : priceMetrics?.paddingRight ?? 0) + 3,
-          amountCell: choice.placement === "span" ? row.amountCell : null,
-          amountInset: choice.placement === "span" && amountMetrics ? amountMetrics.paddingRight + amountTextWidth + 4 : 0
+          fontPx: (priceMetrics?.fontPx ?? 12) * choice.fontEm,
+          left: priceTextRight + gap
         });
       }
       if (config.convertTotal) {
@@ -1287,7 +1279,7 @@ coin:
     }
     return { prices, volumes };
   }
-  function styleFor(left, top, height, fontPx, color, opacity, alignRight) {
+  function styleFor(left, top, height, fontPx, color, opacity) {
     return [
       ...BADGE_BASE_STYLE,
       `left:${Math.round(left)}px`,
@@ -1295,7 +1287,6 @@ coin:
       `height:${Math.round(height)}px`,
       `line-height:${Math.round(height)}px`,
       `font-size:${fontPx.toFixed(2)}px`,
-      alignRight ? "transform:translateX(-100%)" : "transform:none",
       `color:${color}`,
       `opacity:${opacity}`
     ].join(";");
@@ -1343,7 +1334,6 @@ coin:
     const pricePositions = pricePlaced.map((item) => ({
       ...item,
       cellRect: item.write.cell.getBoundingClientRect(),
-      amountRect: item.write.placement === "span" && item.write.amountCell ? item.write.amountCell.getBoundingClientRect() : null,
       layerRect: item.entry.layer.getBoundingClientRect()
     }));
     const volumePositions = volumePlaced.map((item) => ({
@@ -1352,21 +1342,12 @@ coin:
       layerRect: item.entry.layer.getBoundingClientRect()
     }));
     const priceColor = sanitizeColor(config.priceColor);
-    for (const { write, badge, cellRect, amountRect, layerRect } of pricePositions) {
+    for (const { write, badge, cellRect, layerRect } of pricePositions) {
       if (cellRect.width <= 0 || cellRect.height <= 0) {
         badge.style.display = "none";
         continue;
       }
-      const alignRight = write.placement !== "amount";
-      let left;
-      if (write.placement === "price") {
-        left = cellRect.right - write.rightInset - layerRect.left;
-      } else if (write.placement === "span" && amountRect) {
-        left = amountRect.right - write.amountInset - layerRect.left;
-      } else {
-        left = cellRect.left - layerRect.left + 2;
-      }
-      const style = styleFor(left, cellRect.top - layerRect.top, cellRect.height, write.fontPx, priceColor || "inherit", priceColor ? "1" : "0.75", alignRight);
+      const style = styleFor(write.left - layerRect.left, cellRect.top - layerRect.top, cellRect.height, write.fontPx, priceColor || "inherit", priceColor ? "1" : "0.75");
       paint(badge, style, write.text, write.full);
     }
     for (const { write, badge, cellRect, layerRect } of volumePositions) {
@@ -1375,7 +1356,7 @@ coin:
         continue;
       }
       const width = write.textWidth + 2;
-      const style = styleFor(cellRect.right - layerRect.left - width - 2, cellRect.top - layerRect.top, cellRect.height, write.fontPx, write.color, "1", false);
+      const style = styleFor(cellRect.right - layerRect.left - width - 2, cellRect.top - layerRect.top, cellRect.height, write.fontPx, write.color, "1");
       paint(badge, style, write.text, write.full);
     }
   }

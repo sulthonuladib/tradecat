@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.6
+// @version      0.3.7
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       sulthonuladib
 // @license      MIT
