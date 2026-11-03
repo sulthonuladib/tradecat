@@ -65,6 +65,12 @@ describe('parseNumber', () => {
 });
 
 describe('formatIdr', () => {
+  test('compact is actually shorter for sub-rupiah values', () => {
+    expect(formatIdr(0.082134, { mode: 'full' })).toBe('0,082134');
+    expect(formatIdr(0.082134, { mode: 'compact' })).toBe('0,082');
+    expect(formatIdr(0.0000123, { mode: 'compact' })).toBe('0,000012');
+  });
+
   test('large values use dot thousands and no decimals', () => {
     expect(formatIdr(1248782400)).toBe('1.248.782.400');
     expect(formatIdr(474400)).toBe('474.400');

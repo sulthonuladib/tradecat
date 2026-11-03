@@ -61,7 +61,7 @@ function sanitizeColor(value: string | null | undefined): string {
 
 const LAYER = 'tc-idr-layer';
 const VOLUME_IDR = 'tc-idr-volume';
-type Placement = 'price' | 'amount';
+type Placement = 'price' | 'amount' | 'span';
 type BadgeKind = 'price' | 'volume';
 
 const BADGE_BASE_STYLE = [
@@ -106,18 +106,24 @@ const LAYER_STYLE = [
 
 interface CellMetrics {
   contentWidth: number;
+  paddingRight: number;
   fontPx: number;
   weight: string;
   family: string;
   color: string;
   position: string;
   epoch: number;
+  at: number;
 }
 
 const metricsCache = new WeakMap<HTMLElement, CellMetrics>();
 
-// Cell widths are pinned for the current layout (and re-read after a window
-// resize), so the badge can never grow its own budget and squeeze the amounts.
+// Badges live in the overlay layer now, so re-reading a cell's font/width cannot
+// feed back into its layout. A short TTL matters: the first read can happen
+// while gate is still applying its font, and a permanently cached 10.2px made
+// the IDR number smaller than the 12px price.
+const METRICS_TTL = 1500;
+
 let widthEpoch = 0;
 if (typeof window !== 'undefined') {
   window.addEventListener(
@@ -146,8 +152,9 @@ function measureText(text: string, font: string): number {
 }
 
 function metricsFor(cell: HTMLElement): CellMetrics | null {
+  const now = Date.now();
   const cached = metricsCache.get(cell);
-  if (cached && cached.epoch === widthEpoch) return cached;
+  if (cached && cached.epoch === widthEpoch && now - cached.at < METRICS_TTL) return cached;
 
   let style: CSSStyleDeclaration;
   try {
@@ -163,12 +170,14 @@ function metricsFor(cell: HTMLElement): CellMetrics | null {
 
   const metrics: CellMetrics = {
     contentWidth,
+    paddingRight: parseFloat(style.paddingRight) || 0,
     fontPx,
     weight: style.fontWeight || '400',
     family: style.fontFamily || 'sans-serif',
     color: style.color || 'inherit',
     position: style.position || 'static',
     epoch: widthEpoch,
+    at: now,
   };
   metricsCache.set(cell, metrics);
   return metrics;
@@ -201,32 +210,41 @@ function choosePriceText(
   fit: boolean,
 ): TextChoice {
   const tight = compact.replace(/\s+/g, '');
-  if (!fit || !priceMetrics) return { text: full, fontEm: 0.85, placement: 'price' };
+  // Same size as the exchange price (1em), never a shrunken number unless the
+  // row is genuinely too narrow for every option below.
+  if (!fit || !priceMetrics) return { text: full, fontEm: 1, placement: 'price' };
 
   const tiers: Array<{ text: string; em: number }> = [
-    { text: full, em: 0.85 },
+    { text: full, em: 1 },
     { text: compact, em: 1 },
     { text: tight, em: 1 },
     { text: tight, em: 0.85 },
   ];
 
-  const fitsIn = (metrics: CellMetrics, leadingText: string, tier: { text: string; em: number }): boolean => {
-    const free = metrics.contentWidth - measureText(leadingText, fontFor(metrics, 1)) - 2;
-    return free > 0 && measureText(tier.text, fontFor(metrics, tier.em)) <= free;
-  };
+  const widthOf = (text: string, em: number, metrics: CellMetrics): number =>
+    measureText(text, fontFor(metrics, em));
+
+  const priceFree = priceMetrics.contentWidth - widthOf(priceText, 1, priceMetrics) - 2;
+  const amountFree =
+    amountMetrics && amountText
+      ? amountMetrics.contentWidth - widthOf(amountText, 1, amountMetrics) - 2
+      : 0;
 
   for (const tier of tiers) {
-    if (fitsIn(priceMetrics, priceText, tier)) {
-      return { text: tier.text, fontEm: tier.em, placement: 'price' };
-    }
-  }
+    const width = widthOf(tier.text, tier.em, priceMetrics);
 
-  // Very narrow price cell: use the empty left side of the right-aligned amount.
-  if (amountMetrics && amountText) {
-    for (const tier of tiers) {
-      if (fitsIn(amountMetrics, amountText, tier)) {
-        return { text: tier.text, fontEm: tier.em, placement: 'amount' };
-      }
+    // 1. Right-aligned inside the price cell.
+    if (width <= priceFree) return { text: tier.text, fontEm: tier.em, placement: 'price' };
+
+    // 2. Extend into the empty gap before the right-aligned amount text. Amounts
+    //    are right-aligned, so this space is visually free and keeps 1em.
+    if (amountMetrics && amountText && width <= priceFree + amountFree) {
+      return { text: tier.text, fontEm: tier.em, placement: 'span' };
+    }
+
+    // 3. Very narrow price cell: use the amount cell itself.
+    if (amountMetrics && amountText && width <= amountFree) {
+      return { text: tier.text, fontEm: tier.em, placement: 'amount' };
     }
   }
 
@@ -429,9 +447,13 @@ interface PriceWrite {
   cell: HTMLElement;
   text: string;
   full: string;
-  fontEm: number;
+  fontPx: number;
   placement: Placement;
   textWidth: number;
+  /** For `span`: the amount cell whose left gap the badge may use. */
+  amountCell: HTMLElement | null;
+  /** For `span`: distance from the amount cell's right edge to its text. */
+  amountInset: number;
 }
 
 interface VolumeWrite {
@@ -440,6 +462,7 @@ interface VolumeWrite {
   cell: HTMLElement;
   text: string;
   full: string;
+  fontPx: number;
   textWidth: number;
   color: string;
 }
@@ -484,6 +507,7 @@ function planRows(
       );
       const cell = choice.placement === 'amount' && row.amountCell ? row.amountCell : row.priceCell;
       const hostMetrics = choice.placement === 'amount' ? amountMetrics : priceMetrics;
+      const amountTextWidth = amountMetrics && amountText ? measureText(amountText, fontFor(amountMetrics, 1)) : 0;
 
       prices.push({
         rowEl: row.row,
@@ -491,11 +515,16 @@ function planRows(
         cell,
         text: choice.text,
         full,
-        fontEm: choice.fontEm,
+        fontPx: (hostMetrics?.fontPx ?? 12) * choice.fontEm,
         placement: choice.placement,
         textWidth: hostMetrics
           ? measureText(choice.text, fontFor(hostMetrics, choice.fontEm))
           : choice.text.length * 7,
+        amountCell: choice.placement === 'span' ? row.amountCell : null,
+        amountInset:
+          choice.placement === 'span' && amountMetrics
+            ? amountMetrics.paddingRight + amountTextWidth + 3
+            : 0,
       });
     }
 
@@ -514,6 +543,7 @@ function planRows(
         cell: row.totalCell,
         text,
         full,
+        fontPx: metrics?.fontPx ?? 12,
         textWidth: metrics ? measureText(text, fontFor(metrics, 1)) : text.length * 7,
         color: sanitizeColor(config.volumeColor) || metrics?.color || 'inherit',
       });
@@ -527,7 +557,7 @@ function styleFor(
   left: number,
   top: number,
   height: number,
-  fontEm: number,
+  fontPx: number,
   color: string,
   opacity: string,
 ): string {
@@ -537,7 +567,9 @@ function styleFor(
     `top:${Math.round(top)}px`,
     `height:${Math.round(height)}px`,
     `line-height:${Math.round(height)}px`,
-    `font-size:${fontEm}em`,
+    // px, not em: the badge lives in the overlay layer, whose font size is not
+    // the price cell's. `1em` there rendered 11px against a 12px price.
+    `font-size:${fontPx.toFixed(2)}px`,
     `color:${color}`,
     `opacity:${opacity}`,
   ].join(';');
@@ -603,6 +635,10 @@ function applyOverlays(
   const pricePositions = pricePlaced.map((item) => ({
     ...item,
     cellRect: item.write.cell.getBoundingClientRect(),
+    amountRect:
+      item.write.placement === 'span' && item.write.amountCell
+        ? item.write.amountCell.getBoundingClientRect()
+        : null,
     layerRect: item.entry.layer.getBoundingClientRect(),
   }));
   const volumePositions = volumePlaced.map((item) => ({
@@ -613,21 +649,26 @@ function applyOverlays(
 
   // Pass 3: paint.
   const priceColor = sanitizeColor(config.priceColor);
-  for (const { write, badge, cellRect, layerRect } of pricePositions) {
+  for (const { write, badge, cellRect, amountRect, layerRect } of pricePositions) {
     if (cellRect.width <= 0 || cellRect.height <= 0) {
       badge.style.display = 'none';
       continue;
     }
     const width = write.textWidth + 2;
-    const left =
-      write.placement === 'price'
-        ? cellRect.left - layerRect.left + cellRect.width - width - 2
-        : cellRect.left - layerRect.left + 2;
+    let left: number;
+    if (write.placement === 'price') {
+      left = cellRect.left - layerRect.left + cellRect.width - width - 2;
+    } else if (write.placement === 'span' && amountRect) {
+      // Right-aligned to the amount text, using the otherwise empty left gap.
+      left = amountRect.right - write.amountInset - layerRect.left - width;
+    } else {
+      left = cellRect.left - layerRect.left + 2;
+    }
     const style = styleFor(
       left,
       cellRect.top - layerRect.top,
       cellRect.height,
-      write.fontEm,
+      write.fontPx,
       priceColor || 'inherit',
       priceColor ? '1' : '0.75',
     );
@@ -644,7 +685,7 @@ function applyOverlays(
       cellRect.right - layerRect.left - width - 2,
       cellRect.top - layerRect.top,
       cellRect.height,
-      1,
+      write.fontPx,
       write.color,
       '1',
     );

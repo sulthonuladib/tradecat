@@ -197,12 +197,14 @@ async function main() {
   console.log('gate chain fees (public chains + logged-in json_svr fees)');
   {
     const html = await dumpDom(`/trade/BTC_USDT?fixture=coininfo-gate&site=gate`);
-    expectContains(html, '712.250', 'BTC fee 0,0005 * 77000 USDT * 18500');
-    expectContains(html, '284.900', 'BSC fee 0,0002 -> IDR');
+    expectContains(html, 'Rp. 712.250', 'BTC fee 0,0005 * 77000 USDT * 18500, with Rp.');
+    expectContains(html, 'Rp. 284.900', 'BSC fee 0,0002 -> IDR, with Rp.');
     expectContains(html, 'D✓', 'deposit flag rendered');
     expectContains(html, 'W✗', 'disabled BSC withdrawal rendered');
     expectContains(html, 'min 0,0005 BTC', 'min withdraw in the tooltip');
     expectNotContains(html, 'Log in to load network fees', 'no login hint when the session works');
+    expectContains(html, '1 USDT = Rp. 18.500', 'footer rate is shown in rupiah');
+    expectMatch(html, /rgb\(234,\s*208,\s*90\)/, 'footer rate is the gold colour');
 
     const login = await dumpDom(`/trade/BTC_USDT?fixture=coininfo-gate&site=gate&mode=login`);
     expectContains(login, 'Log in to load network fees', 'gate shows the login hint');
@@ -212,8 +214,8 @@ async function main() {
   console.log('mexc chain fees (same-origin currency/v3)');
   {
     const html = await dumpDom(`/exchange/BTC_USDT?fixture=coininfo-mexc&site=mexc`);
-    expectContains(html, '712.250', 'BTC fee -> IDR');
-    expectContains(html, '1.424.500.000', 'TRX fee 1 * 77000 USDT * 18500');
+    expectContains(html, 'Rp. 712.250', 'BTC fee -> IDR, with Rp.');
+    expectContains(html, 'Rp. 1.424.500.000', 'TRX fee 1 * 77000 USDT * 18500, with Rp.');
     expectContains(html, 'min 0,001 BTC', 'min withdraw in the tooltip');
     expectNotContains(html, 'Log in to load network fees', 'no login hint when the session works');
 

@@ -21,16 +21,18 @@ const DEFAULT_BUNDLE = join(import.meta.dir, '..', 'dist', 'tradecat-idr.user.js
 /** @param {string[]} argv */
 function parseArgs(argv) {
   const urls = [];
-  const flags = { bundle: DEFAULT_BUNDLE, shot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150 };
+  const flags = { bundle: DEFAULT_BUNDLE, shot: null, panelShot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150, evalFile: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
     else if (arg === '--bundle') flags.bundle = argv[++i];
     else if (arg === '--shot') flags.shot = argv[++i];
+    else if (arg === '--panel-shot') flags.panelShot = argv[++i];
     else if (arg === '--wait') flags.wait = Number(argv[++i]);
     else if (arg === '--settle') flags.settle = Number(argv[++i]);
     else if (arg === '--samples') flags.samples = Math.max(1, Number(argv[++i]));
     else if (arg === '--interval') flags.interval = Math.max(50, Number(argv[++i]));
+    else if (arg === '--eval-file') flags.evalFile = argv[++i];
     else if (arg.startsWith('-')) throw new Error(`unknown flag ${arg}`);
     else urls.push(arg);
   }
@@ -48,6 +50,8 @@ const REPORT = `(() => {
   const badges = [...document.querySelectorAll('.tc-idr-price')].filter((b) => b.isConnected);
   const volumes = [...document.querySelectorAll('.tc-idr-volume')].filter((b) => b.isConnected && b.getBoundingClientRect().width > 0);
   let covered = 0, stale = 0, unconverted = 0, maxDy = 0, volumeRows = 0, hiddenTotals = 0;
+  let minFontRatio = 1;
+  const fontPx = (el) => parseFloat(getComputedStyle(el).fontSize) || 0;
 
   for (const row of rows) {
     const rr = row.getBoundingClientRect();
@@ -66,6 +70,8 @@ const REPORT = `(() => {
     const cells = [...row.children];
     const priceCell = cells.find((c) => /price/i.test(c.className)) || cells[0];
     const price = parse((priceCell.textContent || '').replace(badge.textContent || '', ''));
+    const cellFont = fontPx(priceCell);
+    if (cellFont > 0) minFontRatio = Math.min(minFontRatio, fontPx(badge) / cellFont);
     const title = Number((badge.getAttribute('title') || '').replace(/\\./g, ''));
     if (price && rate && Math.abs(title - price * rate) > Math.max(1, price * rate * 1e-4)) stale += 1;
 
@@ -117,6 +123,7 @@ const REPORT = `(() => {
     volumes: volumes.length,
     volumeRows,
     hiddenTotals,
+    minFontRatio: Number(minFontRatio.toFixed(2)),
     adapter: describe && describe.adapter,
     described: describe && describe.rows,
     panel: panelText,
@@ -225,6 +232,7 @@ async function openPage(url, flags) {
   report.minVolumes = Math.min(...samples.map((s) => s.volumes));
   report.maxVolumes = Math.max(...samples.map((s) => s.volumes));
   report.minHidden = Math.min(...samples.map((s) => s.hiddenTotals));
+  report.minFontRatio = Math.min(...samples.map((s) => s.minFontRatio));
   let screenshot = null;
   if (flags.shot) {
     const area = await evaluate(AREA);
@@ -239,6 +247,27 @@ async function openPage(url, flags) {
     }
   }
 
+  if (flags.panelShot) {
+    const rect = await evaluate(`(() => {
+      const host = document.querySelector('#tradecat-panel-host');
+      const panel = host && host.shadowRoot && host.shadowRoot.querySelector('.panel');
+      if (!panel) return null;
+      const r = panel.getBoundingClientRect();
+      return { x: Math.max(0, Math.floor(r.x) - 4), y: Math.max(0, Math.floor(r.y) - 4), width: Math.ceil(r.width) + 8, height: Math.ceil(r.height) + 8 };
+    })()`);
+    if (rect) {
+      const capture = await send('Page.captureScreenshot', { format: 'png', clip: { ...rect, scale: 1 }, captureBeyondViewport: true });
+      if (capture.result?.data) {
+        writeFileSync(flags.panelShot, Buffer.from(capture.result.data, 'base64'));
+        report.panelShot = flags.panelShot;
+      }
+    }
+  }
+
+  if (flags.evalFile) {
+    report.eval = await evaluate(readFileSync(flags.evalFile, 'utf8'));
+  }
+
   const title = await evaluate('document.title');
   ws.close();
   chrome.kill();
@@ -247,7 +276,7 @@ async function openPage(url, flags) {
 
 const { urls, flags } = parseArgs(process.argv.slice(2));
 if (urls.length === 0) {
-  console.error('usage: bun run live <url> [url...] [--shot file.png] [--json] [--bundle file] [--samples N]');
+  console.error('usage: bun run live <url> [url...] [--shot file.png] [--panel-shot file.png] [--json] [--bundle file] [--samples N]');
   process.exit(1);
 }
 
@@ -263,13 +292,15 @@ for (const url of urls) {
       console.log(
         `  adapter=${report.adapter} rows=${report.rows} badges=${report.badges} covered=${report.covered}` +
           ` stale=${report.stale} unconverted=${report.unconverted} maxDy=${report.maxDy}px` +
-          ` volumes=${report.volumes} (min ${report.minVolumes}/${report.maxVolumes}, hidden ${report.minHidden}–${report.rows}, rows ${report.volumeRows})`,
+          ` volumes=${report.volumes} (min ${report.minVolumes}/${report.maxVolumes}, hidden ${report.minHidden}–${report.rows}, rows ${report.volumeRows})` +
+          ` font=${report.minFontRatio}em`,
       );
       if (report.sample?.length) console.log(`  sample: ${report.sample[0]}`);
       if (report.panel !== null) {
         console.log(`  panel: chains=${report.panelChains} hint=${report.panelHint ? `"${report.panelHint}"` : '-'}`);
         console.log(`  panel text: ${report.panel}`);
       }
+      if (report.eval !== undefined) console.log(`  eval: ${JSON.stringify(report.eval)}`);
       if (report.screenshot) console.log(`  screenshot: ${report.screenshot}`);
     }
     if (report.rows === 0 || report.covered === 0) failed = true;

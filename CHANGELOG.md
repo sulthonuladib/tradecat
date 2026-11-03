@@ -3,6 +3,23 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.5
+
+- **IDR price is now exactly the price cell's font size.** The overlay badge used
+  `em`, which resolved against the row list (11px) instead of the price cell
+  (12px), and cell metrics were cached forever - sometimes with a 10.2px font
+  captured during gate's first render. The badge is now sized in px from a
+  refreshed cell measurement (1.5s TTL).
+- **Sub-rupiah values get a real compact form.** `formatIdr(..., {mode:'compact'})`
+  returned the same string as `full` for values below 1, so the fit logic had no
+  shorter option and fell back to 0.85em on pairs like `0.0{5}4684`. Compact now
+  keeps two significant digits (`0,082134` -> `0,082`), so the badge stays at
+  1em; measured `font=1.00em` on gate SHIB and MEXC SHIB.
+- **Panel footer rate**: `1 USDT = Rp. 18.500` at 12px gold instead of 10px grey.
+- **Withdrawal fees use the rupiah prefix**: `fee 0,0005 BTC ≈ Rp. 712.250`.
+- Tests: 52 unit + 76 DOM (footer rate text/colour, Rp.-prefixed fees, compact
+  sub-rupiah formatting).
+
 ## 0.3.4
 
 - Metadata: `@author` is `sulthonuladib` instead of the `tradecat` placeholder

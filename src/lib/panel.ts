@@ -97,6 +97,7 @@ const CSS = `
 .btn.primary { background: #1f6feb; border-color: #1f6feb; }
 .btn.primary:hover { background: #2f81f7; }
 .foot { font-size: 10px; color: #6e7681; display: flex; gap: 6px; align-items: center; }
+.foot .rate { margin-left: auto; font-size: 12px; font-weight: 600; color: #ead05a; white-space: nowrap; }
 .foot .retry { all: unset; cursor: pointer; color: #58a6ff; }
 `;
 
@@ -110,7 +111,7 @@ function feeLabel(chain: ChainInfo, coin: string, priceUsdt: number | null, usdt
   if (chain.fee != null) {
     const coinAmount = `${formatCoin(chain.fee)} ${coin}`;
     if (priceUsdt && usdtIdr) {
-      parts.push(`${coinAmount} ≈ ${formatIdr(chain.fee * priceUsdt * usdtIdr)}`);
+      parts.push(`${coinAmount} ≈ ${formatIdr(chain.fee * priceUsdt * usdtIdr, { prefix: 'Rp. ' })}`);
     } else {
       parts.push(coinAmount);
     }
@@ -297,8 +298,19 @@ export function mountPanel(options: { site: SiteId; getConfig: () => PanelConfig
     }
 
     const rate = currentRate();
-    const rateText = rate.rate ? ` · 1 USDT = ${formatIdr(rate.rate, { mode: 'full' })}` : '';
-    footEl.textContent = `${timeAgo(info.updatedAt)}${rateText}`;
+    footEl.textContent = '';
+
+    const ago = document.createElement('span');
+    ago.textContent = timeAgo(info.updatedAt);
+    footEl.append(ago);
+
+    if (rate.rate) {
+      const rateEl = document.createElement('span');
+      rateEl.className = 'rate';
+      rateEl.textContent = `1 USDT = ${formatIdr(rate.rate, { mode: 'full', prefix: 'Rp. ' })}`;
+      footEl.append(rateEl);
+    }
+
     footEl.title = `${info.source}${rate.source ? ` · rate from ${rate.source} (${timeAgo(rate.updatedAt)})` : ''}`;
   };
 

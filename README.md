@@ -82,8 +82,9 @@ public API (which is why MEXC previously returned nothing):
 | gate | `POST /json_svr/query?u=116` (`type=getWithdrawChainsInfo`, `Csrftoken`) | per-chain `withdraw_txfee`, `rate_usdt` |
 | MEXC | `GET /api/platform/asset/api/asset/spot/currency/v3?currency=COIN` | `data.chains[]` (`chainName`, `enableDeposit`, `enableWithdraw`, `withdrawFee`, `withdrawMin`), `data.currencyPrice` |
 
-The fee is shown as `fee 0,0005 BTC ≈ Rp 712.250`:
-`fee × priceUsdt × USDT/IDR rate`. If the fee endpoint needs a login, the panel
+The fee is shown as `fee 0,0005 BTC ≈ Rp. 712.250`
+(`fee × priceUsdt × USDT/IDR rate`). The panel footer shows the rate itself as
+gold `1 USDT = Rp. 18.500`. If the fee endpoint needs a login, the panel
 still lists networks and status and says so; the chips go neutral instead of
 claiming green. Results are cached for 10 minutes under `coininfo.v2.*`.
 

@@ -64,7 +64,15 @@
       return (row.getAttribute('title') || '') + ' || ' + (row.textContent || '').replace(/\s+/g, ' ').trim();
     }) : [];
     var hint = root ? root.querySelector('.chain.hint') : null;
-    document.documentElement.setAttribute('data-tc-panel', JSON.stringify({ chains: chains, hint: hint ? hint.textContent : null }));
+    var rateEl = root ? root.querySelector('.foot .rate') : null;
+    var rateStyle = rateEl ? getComputedStyle(rateEl) : null;
+    document.documentElement.setAttribute('data-tc-panel', JSON.stringify({
+      chains: chains,
+      hint: hint ? hint.textContent : null,
+      rate: rateEl ? rateEl.textContent : null,
+      rateColor: rateStyle ? rateStyle.color : null,
+      rateSize: rateStyle ? rateStyle.fontSize : null
+    }));
   }, 3000);
 </script>
 </body>

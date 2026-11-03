@@ -181,6 +181,13 @@ export function formatIdr(value: number, options: IdrFormatOptions = {}): string
   if (abs === 0) return `${prefix}0`;
 
   if (abs < 1) {
+    if (mode === 'compact') {
+      // Sub-rupiah values need a real compact form too: keeping the full
+      // precision here made `compact` identical to `full`, so callers had no
+      // shorter option and shrank the font instead. Two significant digits.
+      const decimals = Math.min(12, Math.max(2, 1 - Math.floor(Math.log10(abs))));
+      return prefix + idNum(value, { maximumFractionDigits: decimals });
+    }
     // Tiny values (e.g. 0.000000123 USDT * rate) must stay readable.
     const decimals = Math.min(12, Math.max(2, Math.ceil(-Math.log10(abs)) + 4));
     return prefix + idNum(value, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
