@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.5
+// @version      0.3.6
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
 // @author       sulthonuladib
 // @license      MIT
@@ -537,9 +537,14 @@ coin:
       const decimals = Math.min(12, Math.max(2, Math.ceil(-Math.log10(abs)) + 4));
       return prefix + idNum(value, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
     }
-    if (abs < 1000)
-      return prefix + idNum(value, { maximumFractionDigits: 2 });
-    const full = prefix + idNum(value, { maximumFractionDigits: 0 });
+    if (abs < 1000) {
+      return prefix + idNum(value, { maximumFractionDigits: options.decimals ?? 2 });
+    }
+    const fraction = options.decimals ?? 0;
+    const full = prefix + idNum(value, {
+      minimumFractionDigits: fraction,
+      maximumFractionDigits: fraction
+    });
     if (mode === "compact")
       return prefix + formatCompactIdr(value);
     if (mode === "auto") {
@@ -1005,27 +1010,48 @@ coin:
   function fontFor(metrics, em) {
     return `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
   }
-  function choosePriceText(full, compact, priceText, priceMetrics, amountText, amountMetrics, fit) {
+  var textWidthCache = new WeakMap;
+  function elementTextWidth(el, text, fallbackFont) {
+    const cached = textWidthCache.get(el);
+    if (cached && cached.text === text)
+      return cached.width;
+    let width = 0;
+    for (const node of el.childNodes) {
+      if (node.nodeType !== Node.TEXT_NODE)
+        continue;
+      if (!(node.textContent ?? "").trim())
+        continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      width += range.getBoundingClientRect().width;
+    }
+    if (!width)
+      width = measureText(text, fallbackFont);
+    textWidthCache.set(el, { text, width });
+    return width;
+  }
+  function choosePriceText(full, fullDecimals, compact, priceTextWidth, priceMetrics, amountTextWidth, amountMetrics, fit) {
     const tight = compact.replace(/\s+/g, "");
     if (!fit || !priceMetrics)
       return { text: full, fontEm: 1, placement: "price" };
     const tiers = [
+      { text: fullDecimals, em: 1 },
       { text: full, em: 1 },
       { text: compact, em: 1 },
       { text: tight, em: 1 },
       { text: tight, em: 0.85 }
     ];
-    const widthOf = (text, em, metrics) => measureText(text, fontFor(metrics, em));
-    const priceFree = priceMetrics.contentWidth - widthOf(priceText, 1, priceMetrics) - 2;
-    const amountFree = amountMetrics && amountText ? amountMetrics.contentWidth - widthOf(amountText, 1, amountMetrics) - 2 : 0;
+    const SAFETY = 4;
+    const priceFree = priceMetrics.contentWidth - priceTextWidth - 3;
+    const amountFree = amountMetrics && amountTextWidth ? amountMetrics.contentWidth - amountTextWidth - 3 : 0;
     for (const tier of tiers) {
-      const width = widthOf(tier.text, tier.em, priceMetrics);
+      const width = measureText(tier.text, fontFor(priceMetrics, tier.em)) + SAFETY;
       if (width <= priceFree)
         return { text: tier.text, fontEm: tier.em, placement: "price" };
-      if (amountMetrics && amountText && width <= priceFree + amountFree) {
+      if (amountFree > 0 && width <= priceFree + amountFree) {
         return { text: tier.text, fontEm: tier.em, placement: "span" };
       }
-      if (amountMetrics && amountText && width <= amountFree) {
+      if (amountFree > 0 && width <= amountFree) {
         return { text: tier.text, fontEm: tier.em, placement: "amount" };
       }
     }
@@ -1210,14 +1236,20 @@ coin:
       if (config.showPrice && price != null && price > 0) {
         const idr = price * rate;
         const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
+        const fullDecimals = formatIdr(idr, {
+          prefix: config.prefix,
+          mode: config.priceMode,
+          decimals: 2
+        });
         const compact = formatIdr(idr, { prefix: config.prefix, mode: "compact" });
         const priceMetrics = metricsFor(row.priceCell);
         const amountText = row.amount ? siteText(row.amount.el) : null;
         const amountMetrics = row.amountCell ? metricsFor(row.amountCell) : null;
-        const choice = choosePriceText(full, compact, priceText, priceMetrics, amountText, amountMetrics, config.fit);
+        const priceTextWidth = priceMetrics ? elementTextWidth(row.price.el, priceText, fontFor(priceMetrics, 1)) : 0;
+        const amountTextWidth = amountMetrics && amountText && row.amount ? elementTextWidth(row.amount.el, amountText, fontFor(amountMetrics, 1)) : 0;
+        const choice = choosePriceText(full, fullDecimals, compact, priceTextWidth, priceMetrics, amountTextWidth, amountMetrics, config.fit);
         const cell = choice.placement === "amount" && row.amountCell ? row.amountCell : row.priceCell;
         const hostMetrics = choice.placement === "amount" ? amountMetrics : priceMetrics;
-        const amountTextWidth = amountMetrics && amountText ? measureText(amountText, fontFor(amountMetrics, 1)) : 0;
         prices.push({
           rowEl: row.row,
           host: hostOf(row),
@@ -1227,8 +1259,9 @@ coin:
           fontPx: (hostMetrics?.fontPx ?? 12) * choice.fontEm,
           placement: choice.placement,
           textWidth: hostMetrics ? measureText(choice.text, fontFor(hostMetrics, choice.fontEm)) : choice.text.length * 7,
+          rightInset: (choice.placement === "amount" ? 0 : priceMetrics?.paddingRight ?? 0) + 3,
           amountCell: choice.placement === "span" ? row.amountCell : null,
-          amountInset: choice.placement === "span" && amountMetrics ? amountMetrics.paddingRight + amountTextWidth + 3 : 0
+          amountInset: choice.placement === "span" && amountMetrics ? amountMetrics.paddingRight + amountTextWidth + 4 : 0
         });
       }
       if (config.convertTotal) {
@@ -1254,7 +1287,7 @@ coin:
     }
     return { prices, volumes };
   }
-  function styleFor(left, top, height, fontPx, color, opacity) {
+  function styleFor(left, top, height, fontPx, color, opacity, alignRight) {
     return [
       ...BADGE_BASE_STYLE,
       `left:${Math.round(left)}px`,
@@ -1262,6 +1295,7 @@ coin:
       `height:${Math.round(height)}px`,
       `line-height:${Math.round(height)}px`,
       `font-size:${fontPx.toFixed(2)}px`,
+      alignRight ? "transform:translateX(-100%)" : "transform:none",
       `color:${color}`,
       `opacity:${opacity}`
     ].join(";");
@@ -1323,16 +1357,16 @@ coin:
         badge.style.display = "none";
         continue;
       }
-      const width = write.textWidth + 2;
+      const alignRight = write.placement !== "amount";
       let left;
       if (write.placement === "price") {
-        left = cellRect.left - layerRect.left + cellRect.width - width - 2;
+        left = cellRect.right - write.rightInset - layerRect.left;
       } else if (write.placement === "span" && amountRect) {
-        left = amountRect.right - write.amountInset - layerRect.left - width;
+        left = amountRect.right - write.amountInset - layerRect.left;
       } else {
         left = cellRect.left - layerRect.left + 2;
       }
-      const style = styleFor(left, cellRect.top - layerRect.top, cellRect.height, write.fontPx, priceColor || "inherit", priceColor ? "1" : "0.75");
+      const style = styleFor(left, cellRect.top - layerRect.top, cellRect.height, write.fontPx, priceColor || "inherit", priceColor ? "1" : "0.75", alignRight);
       paint(badge, style, write.text, write.full);
     }
     for (const { write, badge, cellRect, layerRect } of volumePositions) {
@@ -1341,7 +1375,7 @@ coin:
         continue;
       }
       const width = write.textWidth + 2;
-      const style = styleFor(cellRect.right - layerRect.left - width - 2, cellRect.top - layerRect.top, cellRect.height, write.fontPx, write.color, "1");
+      const style = styleFor(cellRect.right - layerRect.left - width - 2, cellRect.top - layerRect.top, cellRect.height, write.fontPx, write.color, "1", false);
       paint(badge, style, write.text, write.full);
     }
   }

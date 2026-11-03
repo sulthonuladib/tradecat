@@ -140,6 +140,8 @@ export interface IdrFormatOptions {
   mode?: IdrMode;
   /** Compact values longer than this switch to compact units when mode=auto. */
   maxFullLength?: number;
+  /** Force this many fraction digits on full IDR amounts (e.g. 2 -> 1.407.000,00). */
+  decimals?: number;
 }
 
 const idNum = (value: number, options: Intl.NumberFormatOptions): string => {
@@ -193,9 +195,17 @@ export function formatIdr(value: number, options: IdrFormatOptions = {}): string
     return prefix + idNum(value, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
   }
 
-  if (abs < 1000) return prefix + idNum(value, { maximumFractionDigits: 2 });
+  if (abs < 1000) {
+    return prefix + idNum(value, { maximumFractionDigits: options.decimals ?? 2 });
+  }
 
-  const full = prefix + idNum(value, { maximumFractionDigits: 0 });
+  const fraction = options.decimals ?? 0;
+  const full =
+    prefix +
+    idNum(value, {
+      minimumFractionDigits: fraction,
+      maximumFractionDigits: fraction,
+    });
   if (mode === 'compact') return prefix + formatCompactIdr(value);
   if (mode === 'auto') {
     const limit = options.maxFullLength ?? 13;

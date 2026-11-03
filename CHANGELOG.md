@@ -3,6 +3,25 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.3.6
+
+- **No more IDR/USDT overlap on high-priced coins (ETH, BTC, …).** The fit check
+  used canvas `measureText`, which ignores `font-variant-numeric: tabular-nums`
+  and underestimated the exchange's numbers, so "full" looked like it fit. Text
+  widths now come from a DOM `Range` over the actual text nodes (cached per
+  text), with a 4 px safety margin.
+- **Badges are anchored by their right edge** (`transform: translateX(-100%)`)
+  instead of their left edge, so a rendered width that differs slightly from the
+  measurement can only grow into free space, never over the USDT price. The
+  right edge sits 4 px before the right-aligned amount text.
+  Live: gate ETH/BTC/USDC/PEPE and MEXC ETH/BTC all report a negative overlap
+  (min 9 px gap) and a positive amount gap (≥4 px).
+- **IDR price shows `,00` when it fits**: a two-decimal tier is tried first
+  (`40.649.580,00`), then the integer form (`40.649.580`), then compact
+  (`1,39 M`). Font size stays at the price cell's size in every case.
+- `formatIdr` gained a `decimals` option for forcing trailing digits.
+- Tests: 53 unit + 76 DOM.
+
 ## 0.3.5
 
 - **IDR price is now exactly the price cell's font size.** The overlay badge used

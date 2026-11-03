@@ -187,6 +187,30 @@ function fontFor(metrics: CellMetrics, em: number): string {
   return `${metrics.weight} ${Math.max(8, metrics.fontPx * em).toFixed(2)}px ${metrics.family}`;
 }
 
+// Canvas measureText ignores `font-variant-numeric: tabular-nums` and other CSS
+// text features, so it underestimates gate/MEXC numbers - which made a "full"
+// IDR value look like it fit and overlap the USDT price. Measure the real text
+// node with a Range instead, cached per text value.
+const textWidthCache = new WeakMap<HTMLElement, { text: string; width: number }>();
+
+function elementTextWidth(el: HTMLElement, text: string, fallbackFont: string): number {
+  const cached = textWidthCache.get(el);
+  if (cached && cached.text === text) return cached.width;
+
+  let width = 0;
+  for (const node of el.childNodes) {
+    if (node.nodeType !== Node.TEXT_NODE) continue;
+    if (!(node.textContent ?? '').trim()) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    width += range.getBoundingClientRect().width;
+  }
+  if (!width) width = measureText(text, fallbackFont);
+
+  textWidthCache.set(el, { text, width });
+  return width;
+}
+
 interface TextChoice {
   text: string;
   fontEm: number;
@@ -202,10 +226,11 @@ interface TextChoice {
  */
 function choosePriceText(
   full: string,
+  fullDecimals: string,
   compact: string,
-  priceText: string,
+  priceTextWidth: number,
   priceMetrics: CellMetrics | null,
-  amountText: string | null,
+  amountTextWidth: number,
   amountMetrics: CellMetrics | null,
   fit: boolean,
 ): TextChoice {
@@ -215,35 +240,32 @@ function choosePriceText(
   if (!fit || !priceMetrics) return { text: full, fontEm: 1, placement: 'price' };
 
   const tiers: Array<{ text: string; em: number }> = [
+    { text: fullDecimals, em: 1 },
     { text: full, em: 1 },
     { text: compact, em: 1 },
     { text: tight, em: 1 },
     { text: tight, em: 0.85 },
   ];
 
-  const widthOf = (text: string, em: number, metrics: CellMetrics): number =>
-    measureText(text, fontFor(metrics, em));
-
-  const priceFree = priceMetrics.contentWidth - widthOf(priceText, 1, priceMetrics) - 2;
+  const SAFETY = 4;
+  const priceFree = priceMetrics.contentWidth - priceTextWidth - 3;
   const amountFree =
-    amountMetrics && amountText
-      ? amountMetrics.contentWidth - widthOf(amountText, 1, amountMetrics) - 2
-      : 0;
+    amountMetrics && amountTextWidth ? amountMetrics.contentWidth - amountTextWidth - 3 : 0;
 
   for (const tier of tiers) {
-    const width = widthOf(tier.text, tier.em, priceMetrics);
+    const width = measureText(tier.text, fontFor(priceMetrics, tier.em)) + SAFETY;
 
     // 1. Right-aligned inside the price cell.
     if (width <= priceFree) return { text: tier.text, fontEm: tier.em, placement: 'price' };
 
     // 2. Extend into the empty gap before the right-aligned amount text. Amounts
     //    are right-aligned, so this space is visually free and keeps 1em.
-    if (amountMetrics && amountText && width <= priceFree + amountFree) {
+    if (amountFree > 0 && width <= priceFree + amountFree) {
       return { text: tier.text, fontEm: tier.em, placement: 'span' };
     }
 
     // 3. Very narrow price cell: use the amount cell itself.
-    if (amountMetrics && amountText && width <= amountFree) {
+    if (amountFree > 0 && width <= amountFree) {
       return { text: tier.text, fontEm: tier.em, placement: 'amount' };
     }
   }
@@ -450,6 +472,8 @@ interface PriceWrite {
   fontPx: number;
   placement: Placement;
   textWidth: number;
+  /** Distance from the price cell's right edge to where the badge must end. */
+  rightInset: number;
   /** For `span`: the amount cell whose left gap the badge may use. */
   amountCell: HTMLElement | null;
   /** For `span`: distance from the amount cell's right edge to its text. */
@@ -492,22 +516,34 @@ function planRows(
     if (config.showPrice && price != null && price > 0) {
       const idr = price * rate;
       const full = formatIdr(idr, { prefix: config.prefix, mode: config.priceMode });
+      const fullDecimals = formatIdr(idr, {
+        prefix: config.prefix,
+        mode: config.priceMode,
+        decimals: 2,
+      });
       const compact = formatIdr(idr, { prefix: config.prefix, mode: 'compact' });
       const priceMetrics = metricsFor(row.priceCell);
       const amountText = row.amount ? siteText(row.amount.el) : null;
       const amountMetrics = row.amountCell ? metricsFor(row.amountCell) : null;
+      const priceTextWidth = priceMetrics
+        ? elementTextWidth(row.price.el, priceText, fontFor(priceMetrics, 1))
+        : 0;
+      const amountTextWidth =
+        amountMetrics && amountText && row.amount
+          ? elementTextWidth(row.amount.el, amountText, fontFor(amountMetrics, 1))
+          : 0;
       const choice = choosePriceText(
         full,
+        fullDecimals,
         compact,
-        priceText,
+        priceTextWidth,
         priceMetrics,
-        amountText,
+        amountTextWidth,
         amountMetrics,
         config.fit,
       );
       const cell = choice.placement === 'amount' && row.amountCell ? row.amountCell : row.priceCell;
       const hostMetrics = choice.placement === 'amount' ? amountMetrics : priceMetrics;
-      const amountTextWidth = amountMetrics && amountText ? measureText(amountText, fontFor(amountMetrics, 1)) : 0;
 
       prices.push({
         rowEl: row.row,
@@ -520,10 +556,11 @@ function planRows(
         textWidth: hostMetrics
           ? measureText(choice.text, fontFor(hostMetrics, choice.fontEm))
           : choice.text.length * 7,
+        rightInset: (choice.placement === 'amount' ? 0 : priceMetrics?.paddingRight ?? 0) + 3,
         amountCell: choice.placement === 'span' ? row.amountCell : null,
         amountInset:
           choice.placement === 'span' && amountMetrics
-            ? amountMetrics.paddingRight + amountTextWidth + 3
+            ? amountMetrics.paddingRight + amountTextWidth + 4
             : 0,
       });
     }
@@ -560,6 +597,7 @@ function styleFor(
   fontPx: number,
   color: string,
   opacity: string,
+  alignRight: boolean,
 ): string {
   return [
     ...BADGE_BASE_STYLE,
@@ -570,6 +608,7 @@ function styleFor(
     // px, not em: the badge lives in the overlay layer, whose font size is not
     // the price cell's. `1em` there rendered 11px against a 12px price.
     `font-size:${fontPx.toFixed(2)}px`,
+    alignRight ? 'transform:translateX(-100%)' : 'transform:none',
     `color:${color}`,
     `opacity:${opacity}`,
   ].join(';');
@@ -654,13 +693,15 @@ function applyOverlays(
       badge.style.display = 'none';
       continue;
     }
-    const width = write.textWidth + 2;
+    // Anchor the badge by its right edge (translateX(-100%)). The rendered
+    // width can differ from the canvas estimate, and anchoring by the right
+    // keeps that difference on the free side instead of over the USDT price.
+    const alignRight = write.placement !== 'amount';
     let left: number;
     if (write.placement === 'price') {
-      left = cellRect.left - layerRect.left + cellRect.width - width - 2;
+      left = cellRect.right - write.rightInset - layerRect.left;
     } else if (write.placement === 'span' && amountRect) {
-      // Right-aligned to the amount text, using the otherwise empty left gap.
-      left = amountRect.right - write.amountInset - layerRect.left - width;
+      left = amountRect.right - write.amountInset - layerRect.left;
     } else {
       left = cellRect.left - layerRect.left + 2;
     }
@@ -671,6 +712,7 @@ function applyOverlays(
       write.fontPx,
       priceColor || 'inherit',
       priceColor ? '1' : '0.75',
+      alignRight,
     );
     paint(badge, style, write.text, write.full);
   }
@@ -688,6 +730,7 @@ function applyOverlays(
       write.fontPx,
       write.color,
       '1',
+      false,
     );
     paint(badge, style, write.text, write.full);
   }

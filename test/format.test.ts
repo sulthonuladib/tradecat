@@ -65,6 +65,12 @@ describe('parseNumber', () => {
 });
 
 describe('formatIdr', () => {
+  test('decimals option keeps trailing ,00 on full amounts', () => {
+    expect(formatIdr(40000, { decimals: 2 })).toBe('40.000,00');
+    expect(formatIdr(40649.58, { decimals: 2 })).toBe('40.649,58');
+    expect(formatIdr(40000)).toBe('40.000');
+  });
+
   test('compact is actually shorter for sub-rupiah values', () => {
     expect(formatIdr(0.082134, { mode: 'full' })).toBe('0,082134');
     expect(formatIdr(0.082134, { mode: 'compact' })).toBe('0,082');
