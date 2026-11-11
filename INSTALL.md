@@ -59,14 +59,23 @@ or use the VSCode live-sync flow described in the [README](README.md#development
 
 ## 3. Verify it works
 
-1. Open <https://www.gate.com/trade/BTC_USDT> or
-   <https://www.mexc.fm/exchange/BTC_USDT>.
+1. Open a trade page, e.g.
+   <https://www.gate.com/trade/BTC_USDT>,
+   <https://www.mexc.fm/exchange/BTC_USDT>,
+   <https://www.binance.com/en/trade/BTC_USDT>,
+   <https://www.kucoin.com/trade/BTC-USDT>,
+   <https://www.bybit.com/en/trade/spot/BTC/USDT> or
+   <https://indodax.com/market/BTCIDR>.
 2. Refresh the page once (the scripts attach on load).
 3. You should see:
    - a dim IDR number right after every price in the orderbook,
    - the `Total (USDT)` column showing IDR volumes,
    - a small panel in the bottom-left: coin, **Deposit** / **Withdraw** status,
      the chain list, and two buttons.
+   - On **Bybit** the orderbook is drawn on a canvas, so instead of overlays a
+     small IDR book panel appears in the bottom-right.
+   - On **Indodax** there is only a compact panel with the withdrawal fee and
+     the 1% margin (its prices are already rupiah).
 
 Nothing on screen? Open DevTools → Console and run:
 
@@ -110,10 +119,13 @@ TradeCat.setRate(18085)          // from the DevTools console
 
 ## 5. The rate updater
 
-The panel reads network status and withdrawal fees from the exchange session:
+The panel reads network status and withdrawal fees from the exchange:
 gate uses `wallet/currency_chains` + `/json_svr/query?u=116`, MEXC uses
-`/api/platform/asset/api/asset/spot/currency/v3`. **Log in on the exchange** to
-see fees; without a session the panel still shows the networks and their status.
+`/api/platform/asset/api/asset/spot/currency/v3`, Binance uses
+`getNetworkCoinAll`, KuCoin uses `api/v3/currencies/COIN`, Bybit uses the
+session-backed `asset-common/coin-config`. **Log in on gate/Bybit** to see fees;
+without a session the panel still shows the networks and their status. Indodax's
+fee needs a login on `/finance/<COIN>` (the panel tells you when it is missing).
 
 `TradeCat · USDT/IDR Rate Updater` runs as a ScriptCat crontab script
 (`@crontab */15 * * * *`) (every 15 minutes). It reads

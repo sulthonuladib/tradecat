@@ -5,8 +5,8 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.10
-// @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
+// @version      0.4.0
+// @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com, mexc.fm, binance.com, kucoin.com and bybit.com; Indodax gets a compact fee + 1% margin readout.
 // @author       sulthonuladib
 // @license      MIT
 // @match        https://www.gate.com/trade/*
@@ -17,6 +17,16 @@
 // @match        https://mexc.com/exchange/*
 // @match        https://www.mexc.fm/exchange/*
 // @match        https://mexc.fm/exchange/*
+// @match        https://www.binance.com/trade/*
+// @match        https://www.binance.com/*/trade/*
+// @match        https://www.kucoin.com/trade/*
+// @match        https://www.kucoin.com/*/trade/*
+// @match        https://www.bybit.com/trade/spot/*
+// @match        https://www.bybit.com/*/trade/spot/*
+// @match        https://indodax.com/market/*
+// @match        https://indodax.com/trade/*
+// @match        https://www.indodax.com/market/*
+// @match        https://www.indodax.com/trade/*
 // @run-at       document-start
 // @noframes
 // @storageName  tradecat
@@ -29,6 +39,11 @@
 // @connect      www.mexc.fm
 // @connect      www.mexc.com
 // @connect      api.mexc.com
+// @connect      www.binance.com
+// @connect      api.binance.com
+// @connect      api.kucoin.com
+// @connect      api.bybit.com
+// @connect      api2.bybit.com
 // @connect      indodax.com
 // @connect      api.coingecko.com
 // ==/UserScript==

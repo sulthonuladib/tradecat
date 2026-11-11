@@ -1,12 +1,17 @@
 import { detectSite, type SiteId } from '../site';
+import { binanceAdapter } from './binance';
 import { gateAdapter } from './gate';
 import { genericAdapter } from './generic';
+import { kucoinAdapter } from './kucoin';
 import { mexcAdapter } from './mexc';
 import type { ExchangeAdapter } from './types';
 
-export const ADAPTERS: Record<SiteId, ExchangeAdapter> = {
+/** Sites without a DOM orderbook (Bybit canvas, Indodax simple mode) are absent. */
+export const ADAPTERS: Partial<Record<SiteId, ExchangeAdapter>> = {
   gate: gateAdapter,
   mexc: mexcAdapter,
+  binance: binanceAdapter,
+  kucoin: kucoinAdapter,
   generic: genericAdapter,
 };
 

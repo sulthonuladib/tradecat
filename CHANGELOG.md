@@ -3,6 +3,33 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.4.0
+
+- **Binance, KuCoin and Bybit support**, alongside gate and MEXC:
+  - Binance: rows are `.orderbook-progress` elements; the IDR overlay converts
+    both sides (34 rows in the live check).
+  - KuCoin: virtualised rows are mapped by column position. Its Total column is
+    a cumulative base amount, so the adapter derives the row value from
+    `price × amount` instead of the product test used everywhere else.
+  - Bybit: the spot orderbook is drawn on a `<canvas>`, so there are no cells to
+    overlay. A compact panel (`lib/minibook.ts`) renders the public
+    `/v5/market/orderbook` instead: 10 levels per side, IDR price and cumulative
+    IDR total, refreshed every 3 s.
+- **Deposit / withdraw panel for the new exchanges**:
+  - Binance: public `getNetworkCoinAll` (cached 10 min, per-chain flags/fees).
+  - KuCoin: public `api/v3/currencies/COIN` (per-chain flags/fees).
+  - Bybit: session-backed `asset-common/coin-config`; logged out it degrades to
+    "Log in to load network fees" like gate.
+  - Prices for the fee conversion come from the public tickers.
+- **Indodax: simple mode.** Its prices are already rupiah, so the orderbook
+  conversion and the deposit panel are skipped. A compact panel shows the last
+  price, the **1% margin** and the **withdrawal fee** (network + fee in coin ≈
+  rupiah), read from `/finance/<COIN>` (login) and the public ticker API.
+- Site detection and pair parsing now cover `/market/BTCIDR`,
+  `/trade/BTCIDR/index.html` and Bybit's `/trade/spot/BTC/USDT`.
+- Tests: 65 unit + 77 DOM; `bun run live` understands the new row layouts and
+  the API book (`apiRows`).
+
 ## 0.3.10
 
 - **Full IDR price precision** (`precision: 'price'`): below 1 keeps every digit

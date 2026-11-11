@@ -535,7 +535,7 @@ function planRows(
     }
 
     if (config.convertTotal) {
-      const total = parseNumber(siteText(row.total.el));
+      const total = row.totalValue ?? parseNumber(siteText(row.total.el));
       if (total == null || total <= 0) continue;
 
       const idr = total * rate;

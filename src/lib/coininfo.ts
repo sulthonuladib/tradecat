@@ -233,6 +233,176 @@ export function mexcInfoFrom(body: any, coin: string): CoinInfo {
   };
 }
 
+// --- binance -------------------------------------------------------------
+
+/**
+ * Normalise Binance's public `getNetworkCoinAll` payload:
+ * `{ data: [{ coin, networkList: [{ network, depositEnable, withdrawEnable,
+ * withdrawFee, withdrawMin, withdrawMax }] }] }`.
+ *
+ * The endpoint returns every coin at once, so the caller caches the payload
+ * for the session and this function only picks the requested coin.
+ */
+export function binanceInfoFrom(body: unknown, coin: string): CoinInfo {
+  const rows = listOf((body as any)?.data ?? body);
+  const symbol = coin.toUpperCase();
+  const entry = rows.find((row) => String(row?.coin ?? '').toUpperCase() === symbol);
+  if (!entry) {
+    return {
+      coin,
+      deposit: true,
+      withdraw: true,
+      chains: [],
+      priceUsdt: null,
+      source: 'binance:getNetworkCoinAll (coin not listed)',
+      updatedAt: Date.now(),
+      needsLogin: false,
+    };
+  }
+
+  const chains: ChainInfo[] = [];
+  for (const raw of listOf(entry?.networkList ?? entry?.networks)) {
+    const name = String(raw?.network ?? raw?.networkDisplay ?? raw?.chain ?? '').trim().toUpperCase();
+    if (!name) continue;
+    chains.push({
+      name,
+      deposit: asBool(raw?.depositEnable ?? raw?.deposit_enable, true),
+      withdraw: asBool(raw?.withdrawEnable ?? raw?.withdraw_enable, true),
+      depositDelayed: asBool(raw?.depositDelayed ?? raw?.deposit_delayed, false),
+      withdrawDelayed: asBool(raw?.withdrawDelayed ?? raw?.withdraw_delayed, false),
+      fee: num(raw?.withdrawFee ?? raw?.withdraw_fee),
+      feePercent: null,
+      minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min),
+      maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max),
+    });
+  }
+
+  return {
+    coin,
+    deposit: coinsDeposit(chains, asBool(entry?.depositAllEnable, true)),
+    withdraw: coinsWithdraw(chains, asBool(entry?.withdrawAllEnable, true)),
+    chains,
+    priceUsdt: null,
+    source: 'binance:getNetworkCoinAll',
+    updatedAt: Date.now(),
+    needsLogin: false,
+  };
+}
+
+// --- kucoin --------------------------------------------------------------
+
+/**
+ * Normalise KuCoin's public `api/v3/currencies/{coin}` payload:
+ * `{ code, data: { currency, chains: [{ chainName, isDepositEnabled,
+ * isWithdrawEnabled, withdrawMinFee, withdrawalMinSize, ... }] } }`.
+ */
+export function kucoinInfoFrom(body: any, coin: string): CoinInfo {
+  const code = String(body?.code ?? '');
+  if (code !== '200000' && code !== '0' && body?.data == null) {
+    return {
+      coin,
+      deposit: true,
+      withdraw: true,
+      chains: [],
+      priceUsdt: null,
+      source: 'kucoin:currencies (unavailable)',
+      updatedAt: Date.now(),
+      needsLogin: false,
+      error: String(body?.msg ?? body?.message ?? 'unexpected response'),
+    };
+  }
+
+  const data = body?.data ?? body;
+  const chains: ChainInfo[] = [];
+  for (const raw of listOf(data?.chains ?? data?.networkList)) {
+    const name = String(raw?.chainName ?? raw?.chain ?? raw?.network ?? '').trim().toUpperCase();
+    if (!name) continue;
+    chains.push({
+      name,
+      deposit: asBool(raw?.isDepositEnabled ?? raw?.depositEnabled, true),
+      withdraw: asBool(raw?.isWithdrawEnabled ?? raw?.withdrawEnabled, true),
+      depositDelayed: false,
+      withdrawDelayed: false,
+      fee: num(raw?.withdrawMinFee ?? raw?.withdrawalMinFee ?? raw?.withdrawFee),
+      feePercent: null,
+      minWithdraw: num(raw?.withdrawMinSize ?? raw?.withdrawalMinSize),
+      maxWithdraw: num(raw?.withdrawMaxSize ?? raw?.withdrawalMaxSize),
+    });
+  }
+
+  return {
+    coin,
+    deposit: coinsDeposit(chains, asBool(data?.isDepositEnabled, true)),
+    withdraw: coinsWithdraw(chains, asBool(data?.isWithdrawEnabled, true)),
+    chains,
+    priceUsdt: null,
+    source: 'kucoin:currencies',
+    updatedAt: Date.now(),
+    needsLogin: false,
+  };
+}
+
+// --- bybit ---------------------------------------------------------------
+
+/**
+ * Normalise Bybit's web `asset-common/coin-config` payload. It follows the v5
+ * coin-info shape (`result.rows[].chains[]` with `chain`, `chainDeposit`,
+ * `chainWithdraw`, `withdrawFee`, `withdrawMin`, `withdrawMax`), but the web
+ * endpoint wraps it in `ret_code` instead of `retCode`.
+ *
+ * The endpoint is session backed ("private" in Bybit's URL), so a logged-out
+ * response is reported as `needsLogin` and the panel degrades to a hint.
+ */
+export function bybitInfoFrom(body: any, coin: string): CoinInfo {
+  const retCode = Number(body?.ret_code ?? body?.retCode ?? 0);
+  const message = String(body?.ret_msg ?? body?.retMsg ?? body?.message ?? '');
+  if (retCode !== 0 || /auth|login/i.test(message)) {
+    return {
+      coin,
+      deposit: true,
+      withdraw: true,
+      chains: [],
+      priceUsdt: null,
+      source: 'bybit:coin-config (login required)',
+      updatedAt: Date.now(),
+      needsLogin: true,
+    };
+  }
+
+  const result = body?.result ?? body?.data ?? body;
+  const rows = listOf(result?.rows ?? result?.list ?? result);
+  const symbol = coin.toUpperCase();
+  const entry = rows.find((row) => String(row?.coin ?? row?.currency ?? '').toUpperCase() === symbol) ?? rows[0];
+
+  const chains: ChainInfo[] = [];
+  for (const raw of listOf(entry?.chains ?? entry?.networkList)) {
+    const name = String(raw?.chain ?? raw?.chainName ?? raw?.network ?? '').trim().toUpperCase();
+    if (!name) continue;
+    chains.push({
+      name,
+      deposit: asBool(raw?.chainDeposit ?? raw?.depositEnable, true),
+      withdraw: asBool(raw?.chainWithdraw ?? raw?.withdrawEnable, true),
+      depositDelayed: false,
+      withdrawDelayed: false,
+      fee: num(raw?.withdrawFee ?? raw?.withdraw_fee),
+      feePercent: null,
+      minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min),
+      maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max),
+    });
+  }
+
+  return {
+    coin,
+    deposit: coinsDeposit(chains),
+    withdraw: coinsWithdraw(chains),
+    chains,
+    priceUsdt: null,
+    source: 'bybit:coin-config',
+    updatedAt: Date.now(),
+    needsLogin: false,
+  };
+}
+
 // --- fetching ------------------------------------------------------------
 
 const gateChainsUrl = (coin: string): string =>
@@ -246,6 +416,23 @@ const mexcCurrencyUrl = (coin: string): string =>
 
 const mexcTickerUrl = (coin: string): string =>
   `https://api.mexc.com/api/v3/ticker/price?symbol=${encodeURIComponent(coin)}USDT`;
+
+const binanceAllCoinsUrl = 'https://www.binance.com/bapi/capital/v1/public/capital/getNetworkCoinAll';
+
+const binanceTickerUrl = (coin: string): string =>
+  `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(coin)}USDT`;
+
+const kucoinCurrencyUrl = (coin: string): string =>
+  `https://api.kucoin.com/api/v3/currencies/${encodeURIComponent(coin)}`;
+
+const kucoinTickerUrl = (coin: string): string =>
+  `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${encodeURIComponent(coin)}-USDT`;
+
+const bybitCoinUrl = (coin: string): string =>
+  `https://api2.bybit.com/v3/private/cht/asset-common/coin-config?coin=${encodeURIComponent(coin)}`;
+
+const bybitTickerUrl = (coin: string): string =>
+  `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${encodeURIComponent(coin)}USDT`;
 
 /** Same-origin POST with the page session (gate's json_svr). */
 async function gateFeeBody(coin: string): Promise<any> {
@@ -262,6 +449,26 @@ async function gateFeeBody(coin: string): Promise<any> {
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
+}
+
+/**
+ * Bybit's coin-config lives on api2, but the page session belongs to
+ * bybit.com. Try the page's own fetch first (it sends credentials and passes
+ * the edge checks), then fall back to the extension request.
+ */
+async function bybitCoinBody(coin: string): Promise<any> {
+  if (typeof fetch === 'function' && /(^|\.)bybit\.com$/.test(location.hostname)) {
+    try {
+      const response = await fetch(bybitCoinUrl(coin), {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      });
+      if (response.ok) return response.json();
+    } catch {
+      /* fall through to the GM request */
+    }
+  }
+  return requestJson(bybitCoinUrl(coin));
 }
 
 /** Same-origin GET with the page session (MEXC's web asset API). */
@@ -295,6 +502,33 @@ async function mexcPriceUsdt(coin: string): Promise<number | null> {
   }
 }
 
+async function binancePriceUsdt(coin: string): Promise<number | null> {
+  try {
+    const raw = await requestJson<any>(binanceTickerUrl(coin), 8000);
+    return num(raw?.price);
+  } catch {
+    return null;
+  }
+}
+
+async function kucoinPriceUsdt(coin: string): Promise<number | null> {
+  try {
+    const raw = await requestJson<any>(kucoinTickerUrl(coin), 8000);
+    return num(raw?.data?.price);
+  } catch {
+    return null;
+  }
+}
+
+async function bybitPriceUsdt(coin: string): Promise<number | null> {
+  try {
+    const raw = await requestJson<any>(bybitTickerUrl(coin), 8000);
+    return num(raw?.result?.list?.[0]?.lastPrice);
+  } catch {
+    return null;
+  }
+}
+
 function readCache(site: SiteId, coin: string): CoinInfo | null {
   const cached = getStored<CoinInfo | null>(cacheKey(site, coin), null);
   if (!cached || !cached.updatedAt) return null;
@@ -314,6 +548,16 @@ function unavailable(coin: string, message: string): CoinInfo {
     needsLogin: false,
     error: message,
   };
+}
+
+/** The all-coins payload is ~1 MB, so keep one copy for ten minutes. */
+let binanceCoinsCache: { at: number; body: any } | null = null;
+
+async function binanceCoinsPayload(): Promise<any> {
+  if (binanceCoinsCache && Date.now() - binanceCoinsCache.at < CACHE_TTL) return binanceCoinsCache.body;
+  const body = await requestJson(binanceAllCoinsUrl, 20000);
+  binanceCoinsCache = { at: Date.now(), body };
+  return body;
 }
 
 export async function getCoinInfo(site: SiteId, coin: string, force = false): Promise<CoinInfo> {
@@ -356,6 +600,52 @@ export async function getCoinInfo(site: SiteId, coin: string, force = false): Pr
 
     const info = mexcInfoFrom(body, coin);
     if (info.priceUsdt == null && !info.needsLogin) info.priceUsdt = await mexcPriceUsdt(coin);
+    setStored(cacheKey(site, coin), info);
+    return info;
+  }
+
+  if (site === 'binance') {
+    let body: any;
+    try {
+      body = await binanceCoinsPayload();
+    } catch (error) {
+      log('binance getNetworkCoinAll failed', error);
+      return unavailable(coin, 'Binance asset API unreachable');
+    }
+
+    const info = binanceInfoFrom(body, coin);
+    if (info.priceUsdt == null) info.priceUsdt = await binancePriceUsdt(coin);
+    if (!info.chains.length && !info.error) info.error = 'Coin is not listed on Binance';
+    setStored(cacheKey(site, coin), info);
+    return info;
+  }
+
+  if (site === 'kucoin') {
+    let body: any;
+    try {
+      body = await requestJson(kucoinCurrencyUrl(coin));
+    } catch (error) {
+      log('kucoin currencies failed', error);
+      return unavailable(coin, 'KuCoin asset API unreachable');
+    }
+
+    const info = kucoinInfoFrom(body, coin);
+    if (info.priceUsdt == null && !info.error) info.priceUsdt = await kucoinPriceUsdt(coin);
+    setStored(cacheKey(site, coin), info);
+    return info;
+  }
+
+  if (site === 'bybit') {
+    let body: any;
+    try {
+      body = await bybitCoinBody(coin);
+    } catch (error) {
+      log('bybit coin-config failed', error);
+      return unavailable(coin, 'Bybit asset API unreachable');
+    }
+
+    const info = bybitInfoFrom(body, coin);
+    if (info.priceUsdt == null && !info.needsLogin) info.priceUsdt = await bybitPriceUsdt(coin);
     setStored(cacheKey(site, coin), info);
     return info;
   }

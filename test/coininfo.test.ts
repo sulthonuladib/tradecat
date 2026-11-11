@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { gateInfoFrom, mexcInfoFrom } from '../src/lib/coininfo';
+import { binanceInfoFrom, bybitInfoFrom, gateInfoFrom, kucoinInfoFrom, mexcInfoFrom } from '../src/lib/coininfo';
 
 const gateChains = [
   {
@@ -154,6 +154,148 @@ describe('mexcInfoFrom', () => {
 
   test('reports a login requirement instead of throwing', () => {
     const info = mexcInfoFrom({ code: 401, msg: 'User not log in.' }, 'BTC');
+    expect(info.needsLogin).toBe(true);
+    expect(info.chains).toEqual([]);
+  });
+});
+
+
+describe('binanceInfoFrom', () => {
+  const body = {
+    code: '000000',
+    data: [
+      {
+        coin: 'BTC',
+        depositAllEnable: true,
+        withdrawAllEnable: true,
+        networkList: [
+          { network: 'BTC', depositEnable: true, withdrawEnable: true, withdrawFee: '0.0002', withdrawMin: '0.001', withdrawMax: '10' },
+          { network: 'BSC', depositEnable: true, withdrawEnable: false, withdrawFee: '0.0001', withdrawMin: '0.0005' },
+        ],
+      },
+    ],
+  };
+
+  test('reads networkList flags and fees', () => {
+    const info = binanceInfoFrom(body, 'BTC');
+    expect(info.needsLogin).toBe(false);
+    expect(info.deposit).toBe(true);
+    expect(info.withdraw).toBe(true);
+    expect(info.chains).toEqual([
+      {
+        name: 'BTC',
+        deposit: true,
+        withdraw: true,
+        depositDelayed: false,
+        withdrawDelayed: false,
+        fee: 0.0002,
+        feePercent: null,
+        minWithdraw: 0.001,
+        maxWithdraw: 10,
+      },
+      {
+        name: 'BSC',
+        deposit: true,
+        withdraw: false,
+        depositDelayed: false,
+        withdrawDelayed: false,
+        fee: 0.0001,
+        feePercent: null,
+        minWithdraw: 0.0005,
+        maxWithdraw: null,
+      },
+    ]);
+  });
+
+  test('marks an unlisted coin instead of throwing', () => {
+    const info = binanceInfoFrom(body, 'NOPE');
+    expect(info.chains).toEqual([]);
+    expect(info.source).toContain('not listed');
+  });
+});
+
+describe('kucoinInfoFrom', () => {
+  test('reads chainName / isWithdrawEnabled / withdrawMinFee', () => {
+    const info = kucoinInfoFrom(
+      {
+        code: '200000',
+        data: {
+          currency: 'BTC',
+          chains: [
+            {
+              chainName: 'BTC',
+              isDepositEnabled: true,
+              isWithdrawEnabled: true,
+              withdrawMinFee: '0.00009',
+              withdrawMinSize: '0.00018',
+            },
+            {
+              chainName: 'KCC',
+              isDepositEnabled: false,
+              isWithdrawEnabled: false,
+              withdrawMinFee: '0.00001',
+              withdrawMinSize: '0.0001',
+            },
+          ],
+        },
+      },
+      'BTC',
+    );
+    expect(info.needsLogin).toBe(false);
+    expect(info.chains).toEqual([
+      {
+        name: 'BTC',
+        deposit: true,
+        withdraw: true,
+        depositDelayed: false,
+        withdrawDelayed: false,
+        fee: 0.00009,
+        feePercent: null,
+        minWithdraw: 0.00018,
+        maxWithdraw: null,
+      },
+      {
+        name: 'KCC',
+        deposit: false,
+        withdraw: false,
+        depositDelayed: false,
+        withdrawDelayed: false,
+        fee: 0.00001,
+        feePercent: null,
+        minWithdraw: 0.0001,
+        maxWithdraw: null,
+      },
+    ]);
+  });
+});
+
+describe('bybitInfoFrom', () => {
+  test('reads result.rows[].chains[] with string flags', () => {
+    const info = bybitInfoFrom(
+      {
+        ret_code: 0,
+        result: {
+          rows: [
+            {
+              coin: 'BTC',
+              chains: [
+                { chain: 'BTC', chainDeposit: '1', chainWithdraw: '1', withdrawFee: '0.0002', withdrawMin: '0.001', withdrawMax: '5' },
+                { chain: 'ETH', chainDeposit: '0', chainWithdraw: '1', withdrawFee: '0.0003' },
+              ],
+            },
+          ],
+        },
+      },
+      'BTC',
+    );
+    expect(info.needsLogin).toBe(false);
+    expect(info.chains.map((chain) => chain.name)).toEqual(['BTC', 'ETH']);
+    expect(info.chains[0]).toMatchObject({ deposit: true, withdraw: true, fee: 0.0002, minWithdraw: 0.001, maxWithdraw: 5 });
+    expect(info.chains[1]).toMatchObject({ deposit: false, withdraw: true, fee: 0.0003 });
+  });
+
+  test('reports the session requirement', () => {
+    const info = bybitInfoFrom({ ret_code: 10007, ret_msg: 'User authentication failed.' }, 'BTC');
     expect(info.needsLogin).toBe(true);
     expect(info.chains).toEqual([]);
   });

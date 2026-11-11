@@ -1,10 +1,12 @@
 /**
  * TradeCat entry point.
  */
-import { detectSite } from './lib/site';
+import { detectSite, isSimpleSite, usesApiBook } from './lib/site';
 import { getStored, log } from './lib/store';
 import { initRate, getUsdtIdrRate, onRateChange, rateValue, saveRate, syncRateFromStorage } from './lib/rate';
 import { startOrderbook, describeOrderbook, type OrderbookConfig } from './lib/orderbook';
+import { mountApiBook } from './lib/minibook';
+import { mountSimpleHud } from './lib/simple';
 import { mountPanel, type PanelConfig } from './lib/panel';
 import type { IdrMode } from './lib/format';
 
@@ -113,19 +115,38 @@ async function boot(): Promise<void> {
   const site = detectSite();
   initRate();
 
-  const orderbook = startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
+  // Indodax is rupiah already: only the fee and the 1% margin are useful there.
+  // Bybit draws its book on a canvas, so the engine gets nothing to anchor to
+  // and an API-fed panel takes over instead.
+  const simple = isSimpleSite(site)
+    ? mountSimpleHud({ getConfig: () => ({ position: panelConfig().position }) })
+    : null;
+  const apiBook = usesApiBook(site)
+    ? mountApiBook({ site, getConfig: orderbookConfig, position: 'bottom-right' })
+    : null;
+  const orderbook = simple || apiBook
+    ? null
+    : startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
+
+  const describe = () =>
+    orderbook ? describeOrderbook(site) : simple ? simple.describe() : apiBook!.describe();
+  const rescan = (): void => {
+    orderbook?.rescan();
+    apiBook?.refresh();
+    simple?.refresh();
+  };
 
   // Small debug/automation surface, also handy from the DevTools console.
   (globalThis as any).TradeCat = {
-    describe: () => describeOrderbook(site),
-    rescan: () => orderbook.rescan(),
+    describe,
+    rescan,
     rate: () => rateValue(),
     setRate: (value: number) => saveRate(value, 'manual'),
   };
 
-  const panel = panelConfig().enabled ? mountPanel({ site, getConfig: panelConfig }) : null;
+  const panel = panelConfig().enabled && !simple ? mountPanel({ site, getConfig: panelConfig }) : null;
 
-  onRateChange(() => orderbook.rescan());
+  onRateChange(rescan);
 
   getUsdtIdrRate({
     ttlHours: num('idr.ttlHours', 6),
@@ -143,21 +164,21 @@ async function boot(): Promise<void> {
 
   watchNavigation(() => {
     panel?.refresh();
-    orderbook.rescan();
+    rescan();
   });
 
   registerMenu({
-    rescan: () => orderbook.rescan(),
+    rescan,
     setRate: () => {
       const answer = window.prompt('1 USDT = ? IDR', String(rateValue()));
       if (!answer) return;
       const parsed = Number(answer.replace(/[^\d.]/g, ''));
       if (!Number.isFinite(parsed) || parsed <= 0) return;
       saveRate(parsed, 'manual');
-      orderbook.rescan();
+      rescan();
     },
     debug: () => {
-      const info = describeOrderbook(site);
+      const info = describe();
       log('orderbook debug', info);
       if (typeof GM_notification === 'function') {
         GM_notification({ title: 'TradeCat', text: `${info.rows} rows · adapter: ${info.adapter}` });

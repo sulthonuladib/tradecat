@@ -36,6 +36,14 @@ export interface OrderRow {
   totalCell: HTMLElement;
   /** Column layout key, e.g. "0,1,2" - rows with the same key form one list. */
   key: string;
+  /**
+   * Rendered total, when it differs from the text in `total.el`. KuCoin's Total
+   * column is the cumulative base amount, not price × amount, so its adapter
+   * supplies the value instead of letting the engine re-parse that cell.
+   */
+  totalValue?: number;
+  /** Recompute `totalValue` from price × amount on every refresh. */
+  deriveTotal?: boolean;
 }
 
 interface Triple {
@@ -145,13 +153,15 @@ export function refreshRow(row: OrderRow): OrderRow | null {
   const amount = leaves[amountIndex];
   const total = leaves[totalIndex];
   if (price && amount && total) {
-    return toOrderRow(row.row, {
+    const fresh = toOrderRow(row.row, {
       price,
       amount,
       total,
       key: row.key,
       span: totalIndex - priceIndex,
     });
+    if (row.deriveTotal) fresh.totalValue = price.value * amount.value;
+    return fresh;
   }
   return rowTriple(row.row);
 }

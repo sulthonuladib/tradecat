@@ -5,8 +5,8 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.3.10
-// @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com and mexc.fm.
+// @version      0.4.0
+// @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com, mexc.fm, binance.com, kucoin.com and bybit.com; Indodax gets a compact fee + 1% margin readout.
 // @author       sulthonuladib
 // @license      MIT
 // @match        https://www.gate.com/trade/*
@@ -17,6 +17,16 @@
 // @match        https://mexc.com/exchange/*
 // @match        https://www.mexc.fm/exchange/*
 // @match        https://mexc.fm/exchange/*
+// @match        https://www.binance.com/trade/*
+// @match        https://www.binance.com/*/trade/*
+// @match        https://www.kucoin.com/trade/*
+// @match        https://www.kucoin.com/*/trade/*
+// @match        https://www.bybit.com/trade/spot/*
+// @match        https://www.bybit.com/*/trade/spot/*
+// @match        https://indodax.com/market/*
+// @match        https://indodax.com/trade/*
+// @match        https://www.indodax.com/market/*
+// @match        https://www.indodax.com/trade/*
 // @run-at       document-start
 // @noframes
 // @storageName  tradecat
@@ -29,6 +39,11 @@
 // @connect      www.mexc.fm
 // @connect      www.mexc.com
 // @connect      api.mexc.com
+// @connect      www.binance.com
+// @connect      api.binance.com
+// @connect      api.kucoin.com
+// @connect      api.bybit.com
+// @connect      api2.bybit.com
 // @connect      indodax.com
 // @connect      api.coingecko.com
 // ==/UserScript==
@@ -110,38 +125,81 @@ coin:
 
 (() => {
   // src/lib/site.ts
+  var FORCED = ["gate", "mexc", "binance", "kucoin", "bybit", "indodax"];
   function detectSite(host = location.hostname) {
     const forced = globalThis.__TRADECAT_SITE__;
-    if (forced === "gate" || forced === "mexc")
+    if (forced && FORCED.includes(forced))
       return forced;
     if (/(^|\.)gate\.(com|io)$/.test(host))
       return "gate";
     if (/(^|\.)mexc\.(com|fm)$/.test(host))
       return "mexc";
+    if (/(^|\.)binance\.com$/.test(host))
+      return "binance";
+    if (/(^|\.)kucoin\.com$/.test(host))
+      return "kucoin";
+    if (/(^|\.)bybit\.com$/.test(host))
+      return "bybit";
+    if (/(^|\.)indodax\.com$/.test(host))
+      return "indodax";
     return "generic";
   }
+  function isSimpleSite(site) {
+    return site === "indodax";
+  }
+  function usesApiBook(site) {
+    return site === "bybit";
+  }
+  var QUOTES = ["USDT", "IDR", "BTC", "USDC", "BUSD", "ETH"];
   function currentPair(path = location.pathname) {
-    const match = path.match(/\/(?:trade|exchange|spot)\/([A-Za-z0-9]{1,12})[_-]([A-Za-z0-9]{1,12})/);
-    const base = match?.[1];
-    const quote = match?.[2];
-    if (!base || !quote)
-      return null;
-    return { base: base.toUpperCase(), quote: quote.toUpperCase() };
+    const bybit = path.match(/\/trade\/(?:spot|linear|inverse)\/([A-Za-z0-9]{1,16})\/([A-Za-z0-9]{1,12})/);
+    if (bybit?.[1] && bybit[2]) {
+      return { base: bybit[1].toUpperCase(), quote: bybit[2].toUpperCase() };
+    }
+    const match = path.match(/\/(?:trade|exchange|spot|market)\/([A-Za-z0-9]{1,16})[_-]([A-Za-z0-9]{1,12})/);
+    if (match?.[1] && match[2]) {
+      return { base: match[1].toUpperCase(), quote: match[2].toUpperCase() };
+    }
+    const compact = path.match(/\/(?:trade|market)\/([A-Za-z0-9]{2,20})(?:\/index\.html)?\/?$/);
+    const symbol = compact?.[1]?.toUpperCase();
+    if (symbol && /^[A-Z0-9]+$/.test(symbol)) {
+      for (const quote of QUOTES) {
+        if (symbol.length > quote.length && symbol.endsWith(quote)) {
+          return { base: symbol.slice(0, -quote.length), quote };
+        }
+      }
+    }
+    return null;
+  }
+  function origin(fallback) {
+    return location.origin && location.origin !== "null" ? location.origin : fallback;
   }
   function depositUrl(site, coin) {
-    const origin = location.origin && location.origin !== "null" ? location.origin : "https://www.gate.com";
+    const base = origin("https://www.gate.com");
     if (site === "gate")
-      return `${origin}/myaccount/deposit/${coin}`;
+      return `${base}/myaccount/deposit/${coin}`;
     if (site === "mexc")
-      return `${origin}/assets/deposit/${coin}`;
+      return `${base}/assets/deposit/${coin}`;
+    if (site === "binance")
+      return `${base}/my/wallet/deposit`;
+    if (site === "kucoin")
+      return `${base}/assets/deposit`;
+    if (site === "bybit")
+      return `${base}/en/assets/deposit`;
     return "";
   }
   function withdrawUrl(site, coin) {
-    const origin = location.origin && location.origin !== "null" ? location.origin : "https://www.gate.com";
+    const base = origin("https://www.gate.com");
     if (site === "gate")
-      return `${origin}/myaccount/withdraw/${coin}`;
+      return `${base}/myaccount/withdraw/${coin}`;
     if (site === "mexc")
-      return `${origin}/assets/withdraw/${coin}`;
+      return `${base}/assets/withdraw/${coin}`;
+    if (site === "binance")
+      return `${base}/my/wallet/withdraw`;
+    if (site === "kucoin")
+      return `${base}/assets/withdraw`;
+    if (site === "bybit")
+      return `${base}/en/assets/withdraw`;
     return "";
   }
 
@@ -628,13 +686,16 @@ coin:
     const amount = leaves[amountIndex];
     const total = leaves[totalIndex];
     if (price && amount && total) {
-      return toOrderRow(row.row, {
+      const fresh = toOrderRow(row.row, {
         price,
         amount,
         total,
         key: row.key,
         span: totalIndex - priceIndex
       });
+      if (row.deriveTotal)
+        fresh.totalValue = price.value * amount.value;
+      return fresh;
     }
     return rowTriple(row.row);
   }
@@ -792,6 +853,107 @@ coin:
     return chooseRows(detectRowGroups(scope, { minRows }));
   }
 
+  // src/lib/exchanges/scan.ts
+  function queryAll(doc, selector) {
+    try {
+      return Array.from(doc.querySelectorAll(selector));
+    } catch {
+      return [];
+    }
+  }
+  function rowsFromElements(doc, selectors) {
+    for (const selector of selectors) {
+      const rows = [];
+      for (const item of queryAll(doc, selector)) {
+        if (item === doc.body || item === doc.documentElement)
+          continue;
+        const row = rowTriple(item);
+        if (row)
+          rows.push(row);
+      }
+      if (rows.length >= 2)
+        return rows;
+    }
+    return [];
+  }
+  function rowsFromScopes(doc, selectors, minRows) {
+    const rows = [];
+    const seen = new Set;
+    for (const selector of selectors) {
+      for (const scope of queryAll(doc, selector)) {
+        if (scope === doc.body || scope === doc.documentElement)
+          continue;
+        const found = chooseRows(detectRowGroups(scope, { minRows, maxNodes: 15000 }));
+        for (const row of found) {
+          if (seen.has(row.row))
+            continue;
+          seen.add(row.row);
+          rows.push(row);
+        }
+      }
+    }
+    return rows;
+  }
+  function rowsByPosition(doc, selectors) {
+    for (const selector of selectors) {
+      const rows = [];
+      const seen = new Set;
+      for (const item of queryAll(doc, selector)) {
+        if (seen.has(item) || item === doc.body || item === doc.documentElement)
+          continue;
+        const leaves = leavesOf(item, 6);
+        const price = leaves[0];
+        const amount = leaves[1];
+        const total = leaves[2];
+        if (!price || !amount || !total || !(price.value > 0) || !(amount.value > 0))
+          continue;
+        seen.add(item);
+        rows.push({
+          row: item,
+          price,
+          amount,
+          total,
+          priceCell: cellOf(price.el, item),
+          amountCell: cellOf(amount.el, item),
+          totalCell: cellOf(total.el, item),
+          key: "0,1,2",
+          deriveTotal: true,
+          totalValue: price.value * amount.value
+        });
+      }
+      if (rows.length >= 2)
+        return rows;
+    }
+    return null;
+  }
+  function locateRows(doc, hints) {
+    const minRows = hints.minRows ?? 2;
+    const byRow = rowsFromElements(doc, hints.rows ?? []);
+    if (byRow.length > 0)
+      return byRow;
+    const byScope = rowsFromScopes(doc, hints.scopes ?? [], minRows);
+    return byScope.length > 0 ? byScope : null;
+  }
+
+  // src/lib/exchanges/binance.ts
+  var ROW_SELECTORS = [
+    '[class*="orderbook-progress" i]',
+    '[class*="orderbook-row" i]',
+    '[class*="orderbook-item" i]'
+  ];
+  var SCOPE_SELECTORS = [
+    '[class*="tradew-ob-container" i]',
+    '[class*="orderbook-list" i]',
+    '[class*="orderbook" i]'
+  ];
+  var binanceAdapter = {
+    id: "binance",
+    cacheMs: 300,
+    locate(doc) {
+      return locateRows(doc, { rows: ROW_SELECTORS, scopes: SCOPE_SELECTORS });
+    }
+  };
+
   // src/lib/exchanges/gate.ts
   var SCOPES = [
     '[id*="market-list" i]',
@@ -843,6 +1005,29 @@ coin:
         return null;
       const rows = chooseRows(detectRowGroups(scope, { minRows: 3, maxNodes: 25000, maxLeaves: 2000 }));
       return rows.length ? rows : null;
+    }
+  };
+
+  // src/lib/exchanges/kucoin.ts
+  var ROW_SELECTORS2 = [
+    '[class*="ReactVirtualized__Grid__innerScrollContainer" i] > div',
+    '[class*="orderbook-row" i]',
+    '[class*="orderbook-item" i]',
+    '[class*="orderBookItem" i]'
+  ];
+  var SCOPE_SELECTORS2 = [
+    '[class*="orderbook-content" i]',
+    '[class*="order-book" i]',
+    '[class*="orderbook" i]'
+  ];
+  var kucoinAdapter = {
+    id: "kucoin",
+    cacheMs: 300,
+    locate(doc) {
+      const positional = rowsByPosition(doc, ROW_SELECTORS2);
+      if (positional)
+        return positional;
+      return locateRows(doc, { rows: [], scopes: SCOPE_SELECTORS2 });
     }
   };
 
@@ -914,6 +1099,8 @@ coin:
   var ADAPTERS = {
     gate: gateAdapter,
     mexc: mexcAdapter,
+    binance: binanceAdapter,
+    kucoin: kucoinAdapter,
     generic: genericAdapter
   };
   function adapterFor(site = detectSite()) {
@@ -1260,7 +1447,7 @@ coin:
         });
       }
       if (config.convertTotal) {
-        const total = parseNumber(siteText(row.total.el));
+        const total = row.totalValue ?? parseNumber(siteText(row.total.el));
         if (total == null || total <= 0)
           continue;
         const idr = total * rate;
@@ -1455,6 +1642,628 @@ coin:
     };
   }
 
+  // src/lib/minibook.ts
+  var POS_KEY = "ui.book.pos";
+  var COLLAPSE_KEY = "ui.book.collapsed";
+  var ROWS_PER_SIDE = 10;
+  var REFRESH_MS = 3000;
+  var CSS = `
+:host { all: initial; }
+.panel {
+  position: fixed;
+  z-index: 2147482999;
+  width: 268px;
+  font: 11px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #e6edf3;
+  background: rgba(13, 17, 23, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  user-select: none;
+}
+.panel.pos-bottom-left { left: 14px; bottom: 14px; }
+.panel.pos-bottom-right { right: 14px; bottom: 14px; }
+.panel.pos-top-left { left: 14px; top: 70px; }
+.panel.pos-top-right { right: 14px; top: 70px; }
+.head { display: flex; align-items: center; gap: 4px; padding: 6px 8px; cursor: move; background: rgba(255, 255, 255, 0.04); }
+.pair { font-weight: 700; letter-spacing: 0.02em; }
+.grow { flex: 1; }
+.icon { all: unset; cursor: pointer; padding: 0 4px; border-radius: 4px; color: #8b949e; font-size: 13px; line-height: 1; }
+.icon:hover { color: #e6edf3; background: rgba(255, 255, 255, 0.08); }
+.body { padding: 4px 6px 6px; }
+.panel[data-collapsed="true"] .body, .panel[data-collapsed="true"] .foot { display: none; }
+.cols, .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 4px; align-items: center; }
+.cols { color: #6e7681; font-size: 9px; padding: 2px 4px; }
+.cols span:nth-child(2), .cols span:nth-child(3), .row span:nth-child(2), .row span:nth-child(3) { text-align: right; }
+.row { padding: 1px 4px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+.row.ask .px { color: #ff7b72; }
+.row.bid .px { color: #3fb950; }
+.row .idr { color: #ead05a; }
+.row .tot { color: #8b949e; }
+.mid { margin: 3px 0; padding: 3px 4px; border-top: 1px solid rgba(255,255,255,0.08); border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; gap: 6px; align-items: baseline; }
+.mid b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.mid span { color: #8b949e; margin-left: auto; }
+.foot { font-size: 9px; color: #6e7681; padding: 0 8px 6px; display: flex; gap: 6px; }
+.foot .err { color: #d29922; }
+`;
+  var fmtUsdt = (value) => {
+    const decimals = Math.abs(value) >= 1 ? Math.abs(value) >= 1000 ? 2 : 4 : 8;
+    return value.toLocaleString("en-US", { maximumFractionDigits: decimals });
+  };
+  function parseLevels(raw) {
+    if (!Array.isArray(raw))
+      return [];
+    const levels = [];
+    for (const entry of raw) {
+      if (!Array.isArray(entry))
+        continue;
+      const price = Number(entry[0]);
+      const size = Number(entry[1]);
+      if (!Number.isFinite(price) || !Number.isFinite(size) || price <= 0)
+        continue;
+      levels.push({ price, size });
+    }
+    return levels;
+  }
+  async function fetchBook(site, base, quote) {
+    const symbol = `${base}${quote}`;
+    if (site === "bybit") {
+      const body = await requestJson(`https://api.bybit.com/v5/market/orderbook?category=spot&symbol=${encodeURIComponent(symbol)}&limit=50`, 1e4);
+      const result = body?.result;
+      if (!result)
+        return null;
+      return { asks: parseLevels(result.a), bids: parseLevels(result.b) };
+    }
+    return null;
+  }
+  function mountApiBook(options) {
+    const host = document.createElement("div");
+    host.id = "tradecat-book-host";
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML = `
+    <div class="head">
+      <span class="pair">—</span>
+      <span class="grow"></span>
+      <button class="icon" data-act="refresh" title="Refresh orderbook">↻</button>
+      <button class="icon" data-act="collapse" title="Collapse">−</button>
+    </div>
+    <div class="body">
+      <div class="cols"><span>Price</span><span>IDR</span><span>Total IDR</span></div>
+      <div class="asks"></div>
+      <div class="mid"><b>—</b><span></span></div>
+      <div class="bids"></div>
+    </div>
+    <div class="foot"><span class="status">loading…</span><span class="grow"></span><span class="rate"></span></div>`;
+    shadow.append(style, panel);
+    const $ = (selector) => panel.querySelector(selector);
+    const pairEl = $(".pair");
+    const asksEl = $(".asks");
+    const bidsEl = $(".bids");
+    const midEl = $(".mid b");
+    const spreadEl = $(".mid span");
+    const statusEl = $(".status");
+    const rateEl = $(".rate");
+    const footEl = $(".foot");
+    let base = "";
+    let quote = "";
+    let timer = null;
+    let busy = false;
+    let stopped = false;
+    let lastUpdated = 0;
+    const applyPosition = () => {
+      const saved = getStored(POS_KEY, null);
+      panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
+      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+        panel.style.left = `${saved.left}px`;
+        panel.style.top = `${saved.top}px`;
+        panel.style.right = "auto";
+        panel.style.bottom = "auto";
+        return;
+      }
+      panel.style.left = "";
+      panel.style.top = "";
+      panel.style.right = "";
+      panel.style.bottom = "";
+      panel.classList.add(`pos-${options.position || "bottom-left"}`);
+    };
+    const renderSide = (target, levels, kind, rate, priceIdr, totalIdr, priceColor, volumeColor) => {
+      target.textContent = "";
+      if (!levels.length)
+        return;
+      let cumulativeUsdt = 0;
+      const rows = levels.slice(0, ROWS_PER_SIDE).map((level) => {
+        cumulativeUsdt += level.price * level.size;
+        return { level, totalIdrValue: cumulativeUsdt * rate };
+      });
+      if (kind === "ask")
+        rows.reverse();
+      for (const { level, totalIdrValue } of rows) {
+        const row = document.createElement("div");
+        row.className = `row ${kind}`;
+        const px = document.createElement("span");
+        px.className = "px";
+        px.textContent = fmtUsdt(level.price);
+        const idr = document.createElement("span");
+        idr.className = "idr";
+        if (priceColor)
+          idr.style.color = priceColor;
+        idr.textContent = rate > 0 ? priceIdr(level.price * rate) : "—";
+        idr.title = rate > 0 ? `1 ${quote} = ${formatIdr(rate, { mode: "full", prefix: "Rp. " })}` : "USDT/IDR rate not set";
+        const tot = document.createElement("span");
+        tot.className = "tot";
+        if (volumeColor)
+          tot.style.color = volumeColor;
+        tot.textContent = rate > 0 ? totalIdr(totalIdrValue) : "—";
+        row.append(px, idr, tot);
+        target.append(row);
+      }
+    };
+    const render = (book, error) => {
+      const config = options.getConfig();
+      const rate = currentRate().rate;
+      const priceIdr = (value) => formatIdr(value, { mode: config.priceMode, prefix: config.prefix });
+      const totalIdr = (value) => formatIdr(value, { mode: config.volumeMode, prefix: config.prefix });
+      rateEl.textContent = rate > 0 ? `1 USDT = ${formatIdr(rate, { mode: "full", prefix: "Rp. " })}` : "rate not set";
+      if (!book) {
+        asksEl.textContent = "";
+        bidsEl.textContent = "";
+        midEl.textContent = "—";
+        spreadEl.textContent = "";
+        statusEl.textContent = error ? "failed" : "no data";
+        statusEl.className = `status${error ? " err" : ""}`;
+        footEl.title = error ?? "";
+        return;
+      }
+      const priceColor = config.priceColor;
+      const volumeColor = config.volumeColor;
+      renderSide(asksEl, book.asks, "ask", rate, priceIdr, totalIdr, priceColor, volumeColor);
+      renderSide(bidsEl, book.bids, "bid", rate, priceIdr, totalIdr, priceColor, volumeColor);
+      const bestAsk = book.asks[0];
+      const bestBid = book.bids[0];
+      const mid = bestAsk && bestBid ? (bestAsk.price + bestBid.price) / 2 : bestAsk?.price ?? bestBid?.price ?? 0;
+      midEl.textContent = mid > 0 ? fmtUsdt(mid) : "—";
+      if (bestAsk && bestBid && bestBid.price > 0) {
+        const spread = (bestAsk.price - bestBid.price) / bestBid.price * 100;
+        spreadEl.textContent = `spread ${spread.toFixed(2)}%`;
+      } else {
+        spreadEl.textContent = "";
+      }
+      statusEl.textContent = lastUpdated ? `api · ${new Date(lastUpdated).toLocaleTimeString()}` : "api";
+      statusEl.className = "status";
+      footEl.title = "";
+    };
+    const load = async () => {
+      if (busy || stopped || !base)
+        return;
+      busy = true;
+      try {
+        const book = await fetchBook(options.site, base, quote);
+        if (!book || !book.asks.length && !book.bids.length) {
+          render(null, "no data");
+          return;
+        }
+        lastUpdated = Date.now();
+        render(book);
+      } catch (error) {
+        render(null, error instanceof Error ? error.message : String(error));
+      } finally {
+        busy = false;
+      }
+    };
+    const syncPair = () => {
+      const pair = currentPair();
+      if (!pair) {
+        host.style.display = "none";
+        return;
+      }
+      host.style.display = "";
+      if (pair.base === base && pair.quote === quote)
+        return;
+      base = pair.base;
+      quote = pair.quote;
+      pairEl.textContent = `${base}/${quote}`;
+      asksEl.textContent = "";
+      bidsEl.textContent = "";
+      statusEl.textContent = "loading…";
+      load();
+    };
+    const schedule = () => {
+      if (timer)
+        clearInterval(timer);
+      timer = setInterval(() => {
+        if (document.hidden)
+          return;
+        load();
+      }, REFRESH_MS);
+    };
+    panel.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-act]");
+      if (!target)
+        return;
+      const action = target.dataset["act"];
+      if (action === "refresh")
+        load();
+      if (action === "collapse") {
+        const collapsed = panel.dataset["collapsed"] !== "true";
+        panel.dataset["collapsed"] = String(collapsed);
+        target.textContent = collapsed ? "+" : "−";
+        setStored(COLLAPSE_KEY, collapsed);
+      }
+    });
+    const head = $(".head");
+    let drag = null;
+    head.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("[data-act]"))
+        return;
+      const rect = panel.getBoundingClientRect();
+      drag = { startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top };
+      head.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+    head.addEventListener("pointermove", (event) => {
+      if (!drag)
+        return;
+      const left = Math.max(0, Math.min(window.innerWidth - 80, drag.left + event.clientX - drag.startX));
+      const top = Math.max(0, Math.min(window.innerHeight - 40, drag.top + event.clientY - drag.startY));
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+    });
+    head.addEventListener("pointerup", (event) => {
+      if (!drag)
+        return;
+      const rect = panel.getBoundingClientRect();
+      setStored(POS_KEY, { left: Math.round(rect.left), top: Math.round(rect.top) });
+      drag = null;
+      try {
+        head.releasePointerCapture(event.pointerId);
+      } catch {}
+    });
+    const mount = () => {
+      if (!document.body) {
+        requestAnimationFrame(mount);
+        return;
+      }
+      document.body.appendChild(host);
+      applyPosition();
+      if (getStored(COLLAPSE_KEY, false)) {
+        panel.dataset["collapsed"] = "true";
+        $('[data-act="collapse"]').textContent = "+";
+      }
+      syncPair();
+      schedule();
+    };
+    mount();
+    return {
+      refresh: () => {
+        applyPosition();
+        syncPair();
+        load();
+      },
+      destroy: () => {
+        stopped = true;
+        if (timer)
+          clearInterval(timer);
+        host.remove();
+      },
+      describe: () => {
+        const rows = asksEl.children.length + bidsEl.children.length;
+        const first = asksEl.lastElementChild?.textContent ?? "";
+        return { adapter: `${options.site}:api-book`, rows, sample: first ? [first] : [] };
+      }
+    };
+  }
+
+  // src/lib/simple.ts
+  var POS_KEY2 = "ui.simple.pos";
+  var COLLAPSE_KEY2 = "ui.simple.collapsed";
+  var FEE_TTL = 10 * 60 * 1000;
+  var TICKER_MS = 15000;
+  var CSS2 = `
+:host { all: initial; }
+.panel {
+  position: fixed;
+  z-index: 2147482999;
+  min-width: 216px;
+  max-width: 280px;
+  font: 12px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #e6edf3;
+  background: rgba(13, 17, 23, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  user-select: none;
+}
+.panel.pos-bottom-left { left: 14px; bottom: 14px; }
+.panel.pos-bottom-right { right: 14px; bottom: 14px; }
+.panel.pos-top-left { left: 14px; top: 70px; }
+.panel.pos-top-right { right: 14px; top: 70px; }
+.head { display: flex; align-items: center; gap: 4px; padding: 6px 8px; cursor: move; background: rgba(255, 255, 255, 0.04); }
+.coin { font-weight: 700; letter-spacing: 0.02em; }
+.quote { color: #8b949e; font-size: 11px; }
+.grow { flex: 1; }
+.icon { all: unset; cursor: pointer; padding: 0 4px; border-radius: 4px; color: #8b949e; font-size: 13px; line-height: 1; }
+.icon:hover { color: #e6edf3; background: rgba(255, 255, 255, 0.08); }
+.body { padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+.panel[data-collapsed="true"] .body { display: none; }
+.line { display: flex; align-items: baseline; gap: 8px; }
+.line .k { color: #8b949e; font-size: 11px; white-space: nowrap; }
+.line .v { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.line .v.price { color: #e6edf3; }
+.line .v.margin { color: #ead05a; }
+.line .v.fee { color: #ead05a; }
+.line .net { color: #c9d1d9; font-weight: 600; }
+.hint { color: #d29922; font-size: 10px; line-height: 1.35; }
+.hint:empty { display: none; }
+.foot { display: flex; gap: 6px; align-items: center; font-size: 10px; color: #6e7681; }
+.foot .retry { all: unset; cursor: pointer; color: #58a6ff; margin-left: auto; }
+`;
+  var feeKey = (coin) => `indodax.fee.${coin}`;
+  function parseFeePage(html) {
+    if (typeof DOMParser !== "function")
+      return { network: null, fee: null, needsLogin: false, at: Date.now() };
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const feeNode = doc.querySelector("#withdraw_fee_value");
+    const netNode = doc.querySelector("#withdraw_network");
+    const network = (netNode?.selectedOptions?.[0]?.textContent ?? netNode?.value ?? netNode?.textContent ?? "").trim() || null;
+    const feeText = (feeNode?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const fee = feeText ? parseNumber(feeText) : null;
+    return { network, fee, needsLogin: !feeNode, at: Date.now() };
+  }
+  async function fetchFeePage(coin) {
+    if (typeof fetch === "function" && /(^|\.)indodax\.com$/.test(location.hostname)) {
+      try {
+        const response = await fetch(`/finance/${encodeURIComponent(coin)}`, { credentials: "same-origin" });
+        if (response.ok)
+          return response.text();
+      } catch {}
+    }
+    return requestText(`https://indodax.com/finance/${encodeURIComponent(coin)}`, 15000);
+  }
+  async function readFee(coin, force) {
+    const cached = getStored(feeKey(coin), null);
+    if (!force && cached && Date.now() - cached.at < FEE_TTL)
+      return cached;
+    try {
+      const html = await fetchFeePage(coin);
+      const info = parseFeePage(html);
+      setStored(feeKey(coin), info);
+      return info;
+    } catch (error) {
+      log("indodax finance failed", error);
+      return cached ?? { network: null, fee: null, needsLogin: true, at: Date.now() };
+    }
+  }
+  function mountSimpleHud(options) {
+    const host = document.createElement("div");
+    host.id = "tradecat-simple-host";
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = CSS2;
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML = `
+    <div class="head">
+      <span class="coin">—</span>
+      <span class="quote"></span>
+      <span class="grow"></span>
+      <button class="icon" data-act="refresh" title="Refresh fee">↻</button>
+      <button class="icon" data-act="collapse" title="Collapse">−</button>
+    </div>
+    <div class="body">
+      <div class="line"><span class="k">Harga</span><span class="v price">—</span></div>
+      <div class="line"><span class="k">Selisih 1%</span><span class="v margin">—</span></div>
+      <div class="line"><span class="k">Fee <span class="net"></span></span><span class="v fee">—</span></div>
+      <div class="hint"></div>
+    </div>
+    <div class="foot"><span class="status"></span><button class="retry" data-act="refresh">retry</button></div>`;
+    shadow.append(style, panel);
+    const $ = (selector) => panel.querySelector(selector);
+    const coinEl = $(".coin");
+    const quoteEl = $(".quote");
+    const priceEl = $(".v.price");
+    const marginEl = $(".v.margin");
+    const feeEl = $(".v.fee");
+    const netEl = $(".net");
+    const hintEl = $(".hint");
+    const statusEl = $(".status");
+    let base = "";
+    let quote = "";
+    let ticker = { last: null, ask: null };
+    let feeInfo = null;
+    let stopped = false;
+    let timer = null;
+    const applyPosition = () => {
+      const saved = getStored(POS_KEY2, null);
+      panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
+      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+        panel.style.left = `${saved.left}px`;
+        panel.style.top = `${saved.top}px`;
+        panel.style.right = "auto";
+        panel.style.bottom = "auto";
+        return;
+      }
+      panel.style.left = "";
+      panel.style.top = "";
+      panel.style.right = "";
+      panel.style.bottom = "";
+      panel.classList.add(`pos-${options.getConfig().position || "bottom-left"}`);
+    };
+    const toIdr = (value) => {
+      if (value == null)
+        return 0;
+      if (quote === "IDR")
+        return value;
+      if (quote === "USDT")
+        return value * currentRate().rate;
+      return 0;
+    };
+    const render = () => {
+      coinEl.textContent = base || "—";
+      quoteEl.textContent = quote ? `/${quote}` : "";
+      const price = toIdr(ticker.last);
+      priceEl.textContent = price > 0 ? formatIdr(price, { prefix: "Rp. " }) : "—";
+      priceEl.title = ticker.last != null && quote !== "IDR" ? `last ${ticker.last} ${quote}` : "";
+      const ask = ticker.ask ?? ticker.last;
+      const margin = toIdr(ask);
+      marginEl.textContent = margin > 0 ? formatIdr(margin * 0.01, { prefix: "Rp. " }) : "—";
+      const coinPrice = toIdr(ticker.last);
+      if (feeInfo?.fee != null) {
+        netEl.textContent = feeInfo.network ? `(${feeInfo.network})` : "";
+        const rupiah = coinPrice > 0 ? feeInfo.fee * coinPrice : 0;
+        const coinText = `${feeInfo.fee.toLocaleString("id-ID", { maximumFractionDigits: 8 })} ${base}`;
+        feeEl.textContent = rupiah > 0 ? `${coinText} ≈ ${formatIdr(rupiah, { prefix: "Rp. " })}` : coinText;
+        feeEl.title = rupiah > 0 ? `${coinText} × ${formatIdr(coinPrice, { prefix: "Rp. " })}` : coinText;
+        hintEl.textContent = "";
+      } else if (feeInfo?.needsLogin) {
+        netEl.textContent = "";
+        feeEl.textContent = "—";
+        hintEl.textContent = "Login untuk memuat fee penarikan (halaman finance).";
+      } else {
+        netEl.textContent = "";
+        feeEl.textContent = "—";
+        hintEl.textContent = feeInfo ? "Fee tidak tersedia untuk koin ini." : "Memuat fee…";
+      }
+      statusEl.textContent = ticker.last ? `api · ${new Date().toLocaleTimeString()}` : "memuat harga…";
+    };
+    const loadTicker = async () => {
+      if (!base || stopped)
+        return;
+      try {
+        const body = await requestJson(`https://indodax.com/api/ticker/${base}_${quote}`.toLowerCase(), 1e4);
+        const raw = body?.ticker ?? body;
+        ticker = {
+          last: parseNumber(raw?.last ?? raw?.lastPrice),
+          ask: parseNumber(raw?.sell ?? raw?.ask)
+        };
+        render();
+      } catch (error) {
+        log("indodax ticker failed", error);
+        statusEl.textContent = "harga tidak tersedia";
+      }
+    };
+    const loadFee = async (force) => {
+      if (!base)
+        return;
+      feeInfo = await readFee(base, force);
+      render();
+    };
+    const syncPair = () => {
+      const pair = currentPair();
+      if (!pair) {
+        host.style.display = "none";
+        return;
+      }
+      host.style.display = "";
+      if (pair.base === base && pair.quote === quote)
+        return;
+      base = pair.base;
+      quote = pair.quote;
+      ticker = { last: null, ask: null };
+      feeInfo = null;
+      render();
+      loadTicker();
+      loadFee(false);
+    };
+    const schedule = () => {
+      if (timer)
+        clearInterval(timer);
+      timer = setInterval(() => {
+        if (document.hidden)
+          return;
+        loadTicker();
+      }, TICKER_MS);
+    };
+    panel.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-act]");
+      if (!target)
+        return;
+      const action = target.dataset["act"];
+      if (action === "refresh") {
+        loadTicker();
+        loadFee(true);
+      }
+      if (action === "collapse") {
+        const collapsed = panel.dataset["collapsed"] !== "true";
+        panel.dataset["collapsed"] = String(collapsed);
+        target.textContent = collapsed ? "+" : "−";
+        setStored(COLLAPSE_KEY2, collapsed);
+      }
+    });
+    const head = $(".head");
+    let drag = null;
+    head.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("[data-act]"))
+        return;
+      const rect = panel.getBoundingClientRect();
+      drag = { startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top };
+      head.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+    head.addEventListener("pointermove", (event) => {
+      if (!drag)
+        return;
+      const left = Math.max(0, Math.min(window.innerWidth - 80, drag.left + event.clientX - drag.startX));
+      const top = Math.max(0, Math.min(window.innerHeight - 40, drag.top + event.clientY - drag.startY));
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+    });
+    head.addEventListener("pointerup", (event) => {
+      if (!drag)
+        return;
+      const rect = panel.getBoundingClientRect();
+      setStored(POS_KEY2, { left: Math.round(rect.left), top: Math.round(rect.top) });
+      drag = null;
+      try {
+        head.releasePointerCapture(event.pointerId);
+      } catch {}
+    });
+    const mount = () => {
+      if (!document.body) {
+        requestAnimationFrame(mount);
+        return;
+      }
+      document.body.appendChild(host);
+      applyPosition();
+      if (getStored(COLLAPSE_KEY2, false)) {
+        panel.dataset["collapsed"] = "true";
+        $('[data-act="collapse"]').textContent = "+";
+      }
+      syncPair();
+      schedule();
+    };
+    mount();
+    return {
+      refresh: () => {
+        applyPosition();
+        syncPair();
+        loadTicker();
+      },
+      destroy: () => {
+        stopped = true;
+        if (timer)
+          clearInterval(timer);
+        host.remove();
+      },
+      describe: () => ({
+        adapter: "indodax:simple",
+        rows: ticker.last ? 1 : 0,
+        sample: [`${base}/${quote} last=${ticker.last ?? "-"} fee=${feeInfo?.fee ?? "-"} net=${feeInfo?.network ?? "-"}`]
+      })
+    };
+  }
+
   // src/lib/coininfo.ts
   var CACHE_TTL = 10 * 60 * 1000;
   var CACHE_PREFIX = "coininfo.v2";
@@ -1607,10 +2416,151 @@ coin:
       needsLogin: false
     };
   }
+  function binanceInfoFrom(body, coin) {
+    const rows = listOf(body?.data ?? body);
+    const symbol = coin.toUpperCase();
+    const entry = rows.find((row) => String(row?.coin ?? "").toUpperCase() === symbol);
+    if (!entry) {
+      return {
+        coin,
+        deposit: true,
+        withdraw: true,
+        chains: [],
+        priceUsdt: null,
+        source: "binance:getNetworkCoinAll (coin not listed)",
+        updatedAt: Date.now(),
+        needsLogin: false
+      };
+    }
+    const chains = [];
+    for (const raw of listOf(entry?.networkList ?? entry?.networks)) {
+      const name = String(raw?.network ?? raw?.networkDisplay ?? raw?.chain ?? "").trim().toUpperCase();
+      if (!name)
+        continue;
+      chains.push({
+        name,
+        deposit: asBool(raw?.depositEnable ?? raw?.deposit_enable, true),
+        withdraw: asBool(raw?.withdrawEnable ?? raw?.withdraw_enable, true),
+        depositDelayed: asBool(raw?.depositDelayed ?? raw?.deposit_delayed, false),
+        withdrawDelayed: asBool(raw?.withdrawDelayed ?? raw?.withdraw_delayed, false),
+        fee: num(raw?.withdrawFee ?? raw?.withdraw_fee),
+        feePercent: null,
+        minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min),
+        maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max)
+      });
+    }
+    return {
+      coin,
+      deposit: coinsDeposit(chains, asBool(entry?.depositAllEnable, true)),
+      withdraw: coinsWithdraw(chains, asBool(entry?.withdrawAllEnable, true)),
+      chains,
+      priceUsdt: null,
+      source: "binance:getNetworkCoinAll",
+      updatedAt: Date.now(),
+      needsLogin: false
+    };
+  }
+  function kucoinInfoFrom(body, coin) {
+    const code = String(body?.code ?? "");
+    if (code !== "200000" && code !== "0" && body?.data == null) {
+      return {
+        coin,
+        deposit: true,
+        withdraw: true,
+        chains: [],
+        priceUsdt: null,
+        source: "kucoin:currencies (unavailable)",
+        updatedAt: Date.now(),
+        needsLogin: false,
+        error: String(body?.msg ?? body?.message ?? "unexpected response")
+      };
+    }
+    const data = body?.data ?? body;
+    const chains = [];
+    for (const raw of listOf(data?.chains ?? data?.networkList)) {
+      const name = String(raw?.chainName ?? raw?.chain ?? raw?.network ?? "").trim().toUpperCase();
+      if (!name)
+        continue;
+      chains.push({
+        name,
+        deposit: asBool(raw?.isDepositEnabled ?? raw?.depositEnabled, true),
+        withdraw: asBool(raw?.isWithdrawEnabled ?? raw?.withdrawEnabled, true),
+        depositDelayed: false,
+        withdrawDelayed: false,
+        fee: num(raw?.withdrawMinFee ?? raw?.withdrawalMinFee ?? raw?.withdrawFee),
+        feePercent: null,
+        minWithdraw: num(raw?.withdrawMinSize ?? raw?.withdrawalMinSize),
+        maxWithdraw: num(raw?.withdrawMaxSize ?? raw?.withdrawalMaxSize)
+      });
+    }
+    return {
+      coin,
+      deposit: coinsDeposit(chains, asBool(data?.isDepositEnabled, true)),
+      withdraw: coinsWithdraw(chains, asBool(data?.isWithdrawEnabled, true)),
+      chains,
+      priceUsdt: null,
+      source: "kucoin:currencies",
+      updatedAt: Date.now(),
+      needsLogin: false
+    };
+  }
+  function bybitInfoFrom(body, coin) {
+    const retCode = Number(body?.ret_code ?? body?.retCode ?? 0);
+    const message = String(body?.ret_msg ?? body?.retMsg ?? body?.message ?? "");
+    if (retCode !== 0 || /auth|login/i.test(message)) {
+      return {
+        coin,
+        deposit: true,
+        withdraw: true,
+        chains: [],
+        priceUsdt: null,
+        source: "bybit:coin-config (login required)",
+        updatedAt: Date.now(),
+        needsLogin: true
+      };
+    }
+    const result = body?.result ?? body?.data ?? body;
+    const rows = listOf(result?.rows ?? result?.list ?? result);
+    const symbol = coin.toUpperCase();
+    const entry = rows.find((row) => String(row?.coin ?? row?.currency ?? "").toUpperCase() === symbol) ?? rows[0];
+    const chains = [];
+    for (const raw of listOf(entry?.chains ?? entry?.networkList)) {
+      const name = String(raw?.chain ?? raw?.chainName ?? raw?.network ?? "").trim().toUpperCase();
+      if (!name)
+        continue;
+      chains.push({
+        name,
+        deposit: asBool(raw?.chainDeposit ?? raw?.depositEnable, true),
+        withdraw: asBool(raw?.chainWithdraw ?? raw?.withdrawEnable, true),
+        depositDelayed: false,
+        withdrawDelayed: false,
+        fee: num(raw?.withdrawFee ?? raw?.withdraw_fee),
+        feePercent: null,
+        minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min),
+        maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max)
+      });
+    }
+    return {
+      coin,
+      deposit: coinsDeposit(chains),
+      withdraw: coinsWithdraw(chains),
+      chains,
+      priceUsdt: null,
+      source: "bybit:coin-config",
+      updatedAt: Date.now(),
+      needsLogin: false
+    };
+  }
   var gateChainsUrl = (coin) => `https://api.gateio.ws/api/v4/wallet/currency_chains?currency=${encodeURIComponent(coin)}`;
   var gateTickerUrl = (coin) => `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${encodeURIComponent(coin)}_USDT`;
   var mexcCurrencyUrl = (coin) => `/api/platform/asset/api/asset/spot/currency/v3?currency=${encodeURIComponent(coin)}`;
   var mexcTickerUrl = (coin) => `https://api.mexc.com/api/v3/ticker/price?symbol=${encodeURIComponent(coin)}USDT`;
+  var binanceAllCoinsUrl = "https://www.binance.com/bapi/capital/v1/public/capital/getNetworkCoinAll";
+  var binanceTickerUrl = (coin) => `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(coin)}USDT`;
+  var kucoinCurrencyUrl = (coin) => `https://api.kucoin.com/api/v3/currencies/${encodeURIComponent(coin)}`;
+  var kucoinTickerUrl = (coin) => `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${encodeURIComponent(coin)}-USDT`;
+  var bybitCoinUrl = (coin) => `https://api2.bybit.com/v3/private/cht/asset-common/coin-config?coin=${encodeURIComponent(coin)}`;
+  var bybitTickerUrl = (coin) => `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${encodeURIComponent(coin)}USDT`;
   async function gateFeeBody(coin) {
     if (typeof fetch !== "function")
       throw new Error("fetch unavailable");
@@ -1627,6 +2577,19 @@ coin:
     if (!response.ok)
       throw new Error(`HTTP ${response.status}`);
     return response.json();
+  }
+  async function bybitCoinBody(coin) {
+    if (typeof fetch === "function" && /(^|\.)bybit\.com$/.test(location.hostname)) {
+      try {
+        const response = await fetch(bybitCoinUrl(coin), {
+          credentials: "include",
+          headers: { accept: "application/json" }
+        });
+        if (response.ok)
+          return response.json();
+      } catch {}
+    }
+    return requestJson(bybitCoinUrl(coin));
   }
   async function mexcCurrencyBody(coin) {
     if (typeof fetch !== "function")
@@ -1657,6 +2620,30 @@ coin:
       return null;
     }
   }
+  async function binancePriceUsdt(coin) {
+    try {
+      const raw = await requestJson(binanceTickerUrl(coin), 8000);
+      return num(raw?.price);
+    } catch {
+      return null;
+    }
+  }
+  async function kucoinPriceUsdt(coin) {
+    try {
+      const raw = await requestJson(kucoinTickerUrl(coin), 8000);
+      return num(raw?.data?.price);
+    } catch {
+      return null;
+    }
+  }
+  async function bybitPriceUsdt(coin) {
+    try {
+      const raw = await requestJson(bybitTickerUrl(coin), 8000);
+      return num(raw?.result?.list?.[0]?.lastPrice);
+    } catch {
+      return null;
+    }
+  }
   function readCache(site, coin) {
     const cached = getStored(cacheKey(site, coin), null);
     if (!cached || !cached.updatedAt)
@@ -1677,6 +2664,14 @@ coin:
       needsLogin: false,
       error: message
     };
+  }
+  var binanceCoinsCache = null;
+  async function binanceCoinsPayload() {
+    if (binanceCoinsCache && Date.now() - binanceCoinsCache.at < CACHE_TTL)
+      return binanceCoinsCache.body;
+    const body = await requestJson(binanceAllCoinsUrl, 20000);
+    binanceCoinsCache = { at: Date.now(), body };
+    return body;
   }
   async function getCoinInfo(site, coin, force = false) {
     if (!force) {
@@ -1719,13 +2714,57 @@ coin:
       setStored(cacheKey(site, coin), info);
       return info;
     }
+    if (site === "binance") {
+      let body;
+      try {
+        body = await binanceCoinsPayload();
+      } catch (error) {
+        log("binance getNetworkCoinAll failed", error);
+        return unavailable(coin, "Binance asset API unreachable");
+      }
+      const info = binanceInfoFrom(body, coin);
+      if (info.priceUsdt == null)
+        info.priceUsdt = await binancePriceUsdt(coin);
+      if (!info.chains.length && !info.error)
+        info.error = "Coin is not listed on Binance";
+      setStored(cacheKey(site, coin), info);
+      return info;
+    }
+    if (site === "kucoin") {
+      let body;
+      try {
+        body = await requestJson(kucoinCurrencyUrl(coin));
+      } catch (error) {
+        log("kucoin currencies failed", error);
+        return unavailable(coin, "KuCoin asset API unreachable");
+      }
+      const info = kucoinInfoFrom(body, coin);
+      if (info.priceUsdt == null && !info.error)
+        info.priceUsdt = await kucoinPriceUsdt(coin);
+      setStored(cacheKey(site, coin), info);
+      return info;
+    }
+    if (site === "bybit") {
+      let body;
+      try {
+        body = await bybitCoinBody(coin);
+      } catch (error) {
+        log("bybit coin-config failed", error);
+        return unavailable(coin, "Bybit asset API unreachable");
+      }
+      const info = bybitInfoFrom(body, coin);
+      if (info.priceUsdt == null && !info.needsLogin)
+        info.priceUsdt = await bybitPriceUsdt(coin);
+      setStored(cacheKey(site, coin), info);
+      return info;
+    }
     return unavailable(coin, "Unsupported site");
   }
 
   // src/lib/panel.ts
-  var POS_KEY = "ui.panel.pos";
-  var COLLAPSE_KEY = "ui.panel.collapsed";
-  var CSS = `
+  var POS_KEY3 = "ui.panel.pos";
+  var COLLAPSE_KEY3 = "ui.panel.collapsed";
+  var CSS3 = `
 :host { all: initial; }
 .panel {
   position: fixed;
@@ -1835,7 +2874,7 @@ coin:
     host.id = "tradecat-panel-host";
     const shadow = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = CSS;
+    style.textContent = CSS3;
     const panel = document.createElement("div");
     panel.className = "panel";
     panel.innerHTML = `
@@ -1871,7 +2910,7 @@ coin:
     let info = null;
     let loading = false;
     const applyPosition = () => {
-      const saved = getStored(POS_KEY, null);
+      const saved = getStored(POS_KEY3, null);
       panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
       if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
         panel.style.left = `${saved.left}px`;
@@ -2038,7 +3077,7 @@ coin:
         const collapsed = panel.dataset["collapsed"] !== "true";
         panel.dataset["collapsed"] = String(collapsed);
         target.textContent = collapsed ? "+" : "−";
-        setStored(COLLAPSE_KEY, collapsed);
+        setStored(COLLAPSE_KEY3, collapsed);
       }
     });
     const head = $(".head");
@@ -2065,7 +3104,7 @@ coin:
       if (!drag)
         return;
       const rect = panel.getBoundingClientRect();
-      setStored(POS_KEY, { left: Math.round(rect.left), top: Math.round(rect.top) });
+      setStored(POS_KEY3, { left: Math.round(rect.left), top: Math.round(rect.top) });
       drag = null;
       try {
         head.releasePointerCapture(event.pointerId);
@@ -2078,7 +3117,7 @@ coin:
       }
       document.body.appendChild(host);
       applyPosition();
-      if (getStored(COLLAPSE_KEY, false)) {
+      if (getStored(COLLAPSE_KEY3, false)) {
         panel.dataset["collapsed"] = "true";
         $('[data-act="collapse"]').textContent = "+";
       }
@@ -2186,15 +3225,23 @@ coin:
   async function boot() {
     const site = detectSite();
     initRate();
-    const orderbook = startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
+    const simple = isSimpleSite(site) ? mountSimpleHud({ getConfig: () => ({ position: panelConfig().position }) }) : null;
+    const apiBook = usesApiBook(site) ? mountApiBook({ site, getConfig: orderbookConfig, position: "bottom-right" }) : null;
+    const orderbook = simple || apiBook ? null : startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
+    const describe = () => orderbook ? describeOrderbook(site) : simple ? simple.describe() : apiBook.describe();
+    const rescan = () => {
+      orderbook?.rescan();
+      apiBook?.refresh();
+      simple?.refresh();
+    };
     globalThis.TradeCat = {
-      describe: () => describeOrderbook(site),
-      rescan: () => orderbook.rescan(),
+      describe,
+      rescan,
       rate: () => rateValue(),
       setRate: (value) => saveRate(value, "manual")
     };
-    const panel = panelConfig().enabled ? mountPanel({ site, getConfig: panelConfig }) : null;
-    onRateChange(() => orderbook.rescan());
+    const panel = panelConfig().enabled && !simple ? mountPanel({ site, getConfig: panelConfig }) : null;
+    onRateChange(rescan);
     getUsdtIdrRate({
       ttlHours: num2("idr.ttlHours", 6),
       enableNetwork: bool("idr.enableNetworkRate", false),
@@ -2209,10 +3256,10 @@ coin:
     setInterval(syncRateFromStorage, 30000);
     watchNavigation(() => {
       panel?.refresh();
-      orderbook.rescan();
+      rescan();
     });
     registerMenu({
-      rescan: () => orderbook.rescan(),
+      rescan,
       setRate: () => {
         const answer = window.prompt("1 USDT = ? IDR", String(rateValue()));
         if (!answer)
@@ -2221,10 +3268,10 @@ coin:
         if (!Number.isFinite(parsed) || parsed <= 0)
           return;
         saveRate(parsed, "manual");
-        orderbook.rescan();
+        rescan();
       },
       debug: () => {
-        const info = describeOrderbook(site);
+        const info = describe();
         log("orderbook debug", info);
         if (typeof GM_notification === "function") {
           GM_notification({ title: "TradeCat", text: `${info.rows} rows · adapter: ${info.adapter}` });

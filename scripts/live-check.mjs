@@ -48,7 +48,9 @@ const REPORT = `(() => {
   const rate = globalThis.TradeCat ? TradeCat.rate() : 0;
   const describe = globalThis.TradeCat ? TradeCat.describe() : null;
   const parse = (s) => Number(String(s).replace(/[^\\d.]/g, ''));
-  const rows = [...document.querySelectorAll('[class*="depth-list-item"], [class*="orderbookItem"]')];
+  const bookHost = document.querySelector('#tradecat-book-host');
+  const apiRows = bookHost && bookHost.shadowRoot ? bookHost.shadowRoot.querySelectorAll('.row').length : 0;
+  const rows = apiRows ? [] : [...document.querySelectorAll('[class*="depth-list-item"], [class*="orderbookItem"], [class*="orderbook-progress"], [class*="ReactVirtualized__Grid__innerScrollContainer"] > div')];
   const badges = [...document.querySelectorAll('.tc-idr-price')].filter((b) => b.isConnected);
   const volumes = [...document.querySelectorAll('.tc-idr-volume')].filter((b) => b.isConnected && b.getBoundingClientRect().width > 0);
   let covered = 0, stale = 0, unconverted = 0, maxDy = 0, volumeRows = 0, hiddenTotals = 0;
@@ -116,7 +118,8 @@ const REPORT = `(() => {
   const panelHint = panelRoot ? (panelRoot.querySelector('.chain.hint')?.textContent || null) : null;
 
   return {
-    rows: rows.length,
+    apiRows,
+    rows: rows.length + apiRows,
     badges: badges.length,
     covered,
     stale,

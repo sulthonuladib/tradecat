@@ -15,7 +15,7 @@ jobs:
       - name: Build userscripts
         run: bun run build
       - name: Unit tests
-        run: bun test test/format.test.ts
+        run: bun test test/format.test.ts test/coininfo.test.ts test/site.test.ts
       - name: Typecheck
         run: bunx tsc --noEmit
       - name: Install chromium (for DOM tests)

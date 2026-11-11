@@ -1,6 +1,8 @@
-# TradeCat · IDR Orderbook (gate.com + mexc.fm)
+# TradeCat · IDR Orderbook (gate, MEXC, Binance, KuCoin, Bybit)
 
-ScriptCat userscripts that make USDT orderbooks readable in rupiah.
+ScriptCat userscripts that make USDT orderbooks readable in rupiah. Indodax
+gets a compact fee + 1% margin readout instead, since its prices are already in
+rupiah.
 
 **Install: [INSTALL.md](INSTALL.md)**
 
@@ -12,10 +14,14 @@ ScriptCat userscripts that make USDT orderbooks readable in rupiah.
 | Withdrawal **fee in coin + rupiah**, min/max withdraw | floating panel |
 | Quick **Deposit** / **Withdraw** buttons for the current coin | floating panel |
 | USDT → IDR rate read from shared storage (a separate script can keep it fresh) | storage |
+| **Withdrawal fee + 1% margin** in rupiah (Indodax) | compact panel |
+| API-fed IDR book (Bybit — its orderbook is canvas-drawn) | floating panel |
 
-Tested layouts: gate.com (div based, `266.38K` totals, depth bars) and mexc.fm
-(table based, `3,893.29` totals). Nothing in the engine depends on class names,
-see [How the orderbook detection works](#how-the-orderbook-detection-works).
+Tested layouts: gate.com (divs, `266.38K` totals, depth bars), mexc.fm (table,
+`3,893.29` totals), binance.com (`.orderbook-progress` rows), kucoin.com
+(virtualised rows, cumulative Total column), bybit.com (canvas, replaced by an
+API book) and indodax.com. Nothing in the engine depends on class names, see
+[How the orderbook detection works](#how-the-orderbook-detection-works).
 
 ---
 
@@ -34,8 +40,11 @@ Full walkthrough: **[INSTALL.md](INSTALL.md)** — short version:
    The scripts carry `@updateURL`/`@downloadURL`, so ScriptCat will offer updates
    when `dist/` changes on `main`.
 
-3. Open <https://www.gate.com/trade/BTC_USDT> or
-   <https://www.mexc.fm/exchange/BTC_USDT> and refresh once.
+3. Open a trade page, e.g. <https://www.gate.com/trade/BTC_USDT>,
+   <https://www.binance.com/en/trade/BTC_USDT>,
+   <https://www.kucoin.com/trade/BTC-USDT>,
+   <https://www.bybit.com/en/trade/spot/BTC/USDT> or
+   <https://indodax.com/market/BTCIDR>, and refresh once.
 
 Both scripts declare `@storageName tradecat`, which is how they share the rate
 (ScriptCat specific feature). Without the updater script the orderbook falls back
@@ -73,14 +82,28 @@ Console helpers: `TradeCat.describe()`, `TradeCat.rescan()`, `TradeCat.rate()`,
 
 ## Where the deposit / withdraw data comes from
 
-Both exchanges hide this behind a **logged-in, same-origin** endpoint, not the
-public API (which is why MEXC previously returned nothing):
+gate hides fees behind a **logged-in, same-origin** endpoint; the other
+exchanges expose more or less of the same data publicly:
 
 | Exchange | Endpoint | Gives |
 | --- | --- | --- |
 | gate | `GET /wallet/currency_chains?currency=COIN` (public) | chain list, deposit/withdraw flags, min withdraw |
 | gate | `POST /json_svr/query?u=116` (`type=getWithdrawChainsInfo`, `Csrftoken`) | per-chain `withdraw_txfee`, `rate_usdt` |
 | MEXC | `GET /api/platform/asset/api/asset/spot/currency/v3?currency=COIN` | `data.chains[]` (`chainName`, `enableDeposit`, `enableWithdraw`, `withdrawFee`, `withdrawMin`), `data.currencyPrice` |
+| Binance | `GET /bapi/capital/v1/public/capital/getNetworkCoinAll` (public) | `data[].networkList[]` (`network`, `depositEnable`, `withdrawEnable`, `withdrawFee`, `withdrawMin`, `withdrawMax`) |
+| KuCoin | `GET /api/v3/currencies/COIN` (public) | `data.chains[]` (`chainName`, `isDepositEnabled`, `isWithdrawEnabled`, `withdrawMinFee`, `withdrawMinSize`) |
+| Bybit | `GET api2 /v3/private/cht/asset-common/coin-config` (session) | `result.rows[].chains[]` (`chain`, `chainDeposit`, `chainWithdraw`, `withdrawFee`, `withdrawMin`, `withdrawMax`) |
+
+Binance returns every coin in one payload, so the script keeps one copy for ten
+minutes instead of re-downloading it per coin. Bybit's endpoint is session
+backed, so a logged-out tab shows `Log in to load network fees` while the
+orderbook panel keeps working. Prices for the fee conversion come from the
+public tickers (`api.binance.com`, `api.kucoin.com`, `api.bybit.com`).
+
+Indodax is handled outside this table: its `/finance/<COIN>` page (login only)
+provides `#withdraw_fee_value` and `#withdraw_network`, exactly like the
+reference script; the price and lowest ask come from
+`https://indodax.com/api/ticker/<pair>`.
 
 The fee is shown as `fee 0,0005 BTC ≈ Rp. 712.250`
 (`fee × priceUsdt × USDT/IDR rate`). The panel footer shows the rate itself as
@@ -139,6 +162,9 @@ re-renders are handled once by the engine (`src/lib/orderbook.ts`):
 | --- | --- |
 | gate | gate hints first (`#market-list…`, `*entrust*`, `*trade-grid*`, `*orderbook*`), then structure |
 | mexc | `*orderbookItem*` rows, then `*asks*` / `*bids*` boxes, then structure |
+| binance | `*orderbook-progress*` rows, then `*orderbook*` containers, then structure |
+| kucoin | virtualised grid rows, mapped by column position (its Total column is cumulative, so the product check does not apply) |
+| bybit | no DOM rows (canvas): the engine is skipped and `lib/minibook.ts` renders the public API book |
 | generic | structure only |
 
 The structural rule needs no class names:
@@ -243,6 +269,9 @@ bun run test:dom   # headless Chromium end-to-end tests against fixtures
 bun run check      # tsc: src project + tooling project, both strict
 bun run live https://www.gate.com/trade/BTC_USDT   # real page, real DOM
 bun run live https://www.mexc.fm/exchange/BTC_USDT --shot /tmp/mexc.png
+bun run live https://www.binance.com/en/trade/BTC_USDT
+bun run live https://www.bybit.com/en/trade/spot/BTC/USDT   # API book (apiRows)
+bun run live https://indodax.com/market/BTCIDR
 ```
 
 `bun run live` launches headless Chromium (same CDP protocol Puppeteer uses, no
@@ -270,9 +299,11 @@ src/
   lib/orderbook.ts        engine: render, fit, heartbeat, observers, debug
   lib/detect.ts           structural row detection (price × amount ≈ total)
   lib/dom.ts              injected-text filtering, leaf walking, cell lookup
-  lib/exchanges/          gate / mexc / generic row locators
-  lib/coininfo.ts         deposit/withdraw per coin + chain
+  lib/exchanges/          gate / mexc / binance / kucoin / generic row locators
+  lib/coininfo.ts         deposit/withdraw per coin + chain (all exchanges)
   lib/panel.ts            shadow-DOM panel (chains + Deposit/Withdraw buttons)
+  lib/minibook.ts         API-fed orderbook panel (Bybit canvas)
+  lib/simple.ts           Indodax fee + 1% margin panel
   lib/site.ts             site detection, pair parsing, deposit/withdraw URLs
 scripts/
   bump.ts                 version bump across metadata + package.json
@@ -299,12 +330,20 @@ file).
 
 ## Known limitations
 
-- Only USDT-quoted pairs are converted (the header must read `Price (USDT)`).
-- Rows must satisfy `price * amount ≈ total`. An exchange that displays a
-  *cumulative* total instead would need an extra rule.
+- Only USDT-quoted pairs are converted (the header must read `Price (USDT)`);
+  Indodax pairs are quoted in rupiah and only get the fee/margin panel.
+- Rows must satisfy `price * amount ≈ total`. KuCoin's Total column is a
+  cumulative amount, so its adapter maps columns positionally and derives the
+  row value from `price × amount` instead.
+- Bybit draws its spot orderbook on a `<canvas>`, so there are no cells to
+  overlay. Its panel renders the public `/v5/market/orderbook` instead, with the
+  same IDR formatting; it shows 10 levels per side and refreshes every 3 s.
+- Indodax's finance page needs a login; logged out, the panel says so and only
+  the price/1% margin are shown.
 - MEXC's asset endpoints are behind bot protection from some networks; when they
   fail the panel shows `MEXC asset API unavailable · retry` and the Deposit /
   Withdraw buttons keep working.
-- Deposit / withdraw URLs use the current origin:
+- Deposit / withdraw URLs use the current origin (Binance/KuCoin/Bybit land on
+  their generic wallet pages, since the coin is chosen inside the app):
   gate `/myaccount/{deposit,withdraw}/<COIN>`,
   mexc `/assets/{deposit,withdraw}/<COIN>`.
