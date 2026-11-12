@@ -13,7 +13,13 @@ import type { ExchangeAdapter } from './types';
 import { locateRows } from './scan';
 
 const ROW_SELECTORS = [
-  '[class*="orderbook-progress" i]',
+  // The *visual* row is `.row-content`: Binance wraps it in
+  // `.progress-container` / `.orderbook-progress` shells, and using those as
+  // the row makes every cell lookup climb back to the wrapper, which used to
+  // mark the whole row as "the Total cell" and hide price + amount too.
+  '[class*="orderbook" i] [class*="row-content" i]',
+  '[class*="progress-container" i] > [class*="row-content" i]',
+  '[class*="row-content" i]',
   '[class*="orderbook-row" i]',
   '[class*="orderbook-item" i]',
 ];

@@ -72,8 +72,9 @@ or use the VSCode live-sync flow described in the [README](README.md#development
    - the `Total (USDT)` column showing IDR volumes,
    - a small panel in the bottom-left: coin, **Deposit** / **Withdraw** status,
      the chain list, and two buttons.
-   - On **Bybit** the orderbook is drawn on a canvas, so instead of overlays a
-     small IDR book panel appears in the bottom-right.
+   - On **Bybit** the orderbook is drawn on a canvas, so a converted IDR
+     orderbook panel appears just left of the native one, fed by Bybit's own
+     depth worker (8 levels per side, Price/Qty/Total in IDR).
    - On **Indodax** there is only a compact panel with the withdrawal fee and
      the 1% margin (its prices are already rupiah).
 

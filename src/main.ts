@@ -5,7 +5,7 @@ import { detectSite, isSimpleSite, usesApiBook } from './lib/site';
 import { getStored, log } from './lib/store';
 import { initRate, getUsdtIdrRate, onRateChange, rateValue, saveRate, syncRateFromStorage } from './lib/rate';
 import { startOrderbook, describeOrderbook, type OrderbookConfig } from './lib/orderbook';
-import { mountApiBook } from './lib/minibook';
+import { installBybitDepthHook, mountBybitBook } from './lib/bybit';
 import { mountSimpleHud } from './lib/simple';
 import { mountPanel, type PanelConfig } from './lib/panel';
 import type { IdrMode } from './lib/format';
@@ -117,13 +117,11 @@ async function boot(): Promise<void> {
 
   // Indodax is rupiah already: only the fee and the 1% margin are useful there.
   // Bybit draws its book on a canvas, so the engine gets nothing to anchor to
-  // and an API-fed panel takes over instead.
+  // and a worker-fed converted panel takes over instead.
   const simple = isSimpleSite(site)
     ? mountSimpleHud({ getConfig: () => ({ position: panelConfig().position }) })
     : null;
-  const apiBook = usesApiBook(site)
-    ? mountApiBook({ site, getConfig: orderbookConfig, position: 'bottom-right' })
-    : null;
+  const apiBook = usesApiBook(site) ? mountBybitBook() : null;
   const orderbook = simple || apiBook
     ? null
     : startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
@@ -186,6 +184,10 @@ async function boot(): Promise<void> {
     },
   });
 }
+
+// Bybit feeds its canvas book through a Worker; the setter has to be wrapped
+// before the page creates it, so this cannot wait for DOMContentLoaded.
+if (detectSite() === 'bybit') installBybitDepthHook();
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => void boot(), { once: true });

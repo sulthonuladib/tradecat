@@ -3,6 +3,27 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.4.1
+
+- **Binance overlay no longer hides price and amount.** Binance wraps each row
+  cell in `.row-content` inside `.progress-container` / `.orderbook-progress`.
+  Using the outer shell as the row made every cell lookup climb back to the
+  wrapper, so the "Total" marker was put on the whole row and the
+  `color: transparent` rule hid price, amount and total at once. Rows are now
+  `.row-content`, which keeps USDT price/amount visible, appends the IDR price
+  in the real gap (compact when needed) and replaces only the Total cell.
+- **Bybit: converted orderbook instead of the REST panel.** Bybit's book is a
+  canvas, so `lib/bybit.ts` wraps `Worker.prototype.onmessage` at
+  document-start and consumes Bybit's own `spot.ob_` frames (same approach as
+  the reference `Bybit Price Interceptor`). The panel mirrors the
+  `Updated Bybit Orderbook Experiment`: 8 asks + 8 bids, Price (IDR), Qty (IDR),
+  Total (IDR), depth bars, a mid-price row, and it is anchored to the left side
+  of the native orderbook (it follows the book when the grid is resized).
+  The public REST orderbook is only a fallback when no worker frame arrives.
+- `bun run live --start` injects the bundle before page scripts, so the worker
+  hook can be tested like a real `@run-at document-start` install.
+- Tests: 65 unit + 77 DOM.
+
 ## 0.4.0
 
 - **Binance, KuCoin and Bybit support**, alongside gate and MEXC:

@@ -15,12 +15,12 @@ rupiah.
 | Quick **Deposit** / **Withdraw** buttons for the current coin | floating panel |
 | USDT → IDR rate read from shared storage (a separate script can keep it fresh) | storage |
 | **Withdrawal fee + 1% margin** in rupiah (Indodax) | compact panel |
-| API-fed IDR book (Bybit — its orderbook is canvas-drawn) | floating panel |
+| Converted IDR orderbook fed by Bybit's own depth worker (canvas workaround) | panel left of the native book |
 
 Tested layouts: gate.com (divs, `266.38K` totals, depth bars), mexc.fm (table,
 `3,893.29` totals), binance.com (`.orderbook-progress` rows), kucoin.com
-(virtualised rows, cumulative Total column), bybit.com (canvas, replaced by an
-API book) and indodax.com. Nothing in the engine depends on class names, see
+(virtualised rows, cumulative Total column), bybit.com (canvas, replaced by a
+converted panel fed by the page's own worker) and indodax.com. Nothing in the engine depends on class names, see
 [How the orderbook detection works](#how-the-orderbook-detection-works).
 
 ---
@@ -164,7 +164,7 @@ re-renders are handled once by the engine (`src/lib/orderbook.ts`):
 | mexc | `*orderbookItem*` rows, then `*asks*` / `*bids*` boxes, then structure |
 | binance | `*orderbook-progress*` rows, then `*orderbook*` containers, then structure |
 | kucoin | virtualised grid rows, mapped by column position (its Total column is cumulative, so the product check does not apply) |
-| bybit | no DOM rows (canvas): the engine is skipped and `lib/minibook.ts` renders the public API book |
+| bybit | no DOM rows (canvas): `Worker.prototype.onmessage` is wrapped at document-start, the `spot.ob_` depth frames drive `lib/bybit.ts`, and the panel is anchored left of the native book |
 | generic | structure only |
 
 The structural rule needs no class names:
@@ -270,12 +270,13 @@ bun run check      # tsc: src project + tooling project, both strict
 bun run live https://www.gate.com/trade/BTC_USDT   # real page, real DOM
 bun run live https://www.mexc.fm/exchange/BTC_USDT --shot /tmp/mexc.png
 bun run live https://www.binance.com/en/trade/BTC_USDT
-bun run live https://www.bybit.com/en/trade/spot/BTC/USDT   # API book (apiRows)
+bun run live https://www.bybit.com/en/trade/spot/BTC/USDT --start   # worker hook needs document-start
 bun run live https://indodax.com/market/BTCIDR
 ```
 
 `bun run live` launches headless Chromium (same CDP protocol Puppeteer uses, no
-dependency), opens the page with a normal browser UA, injects `dist/`, and prints
+dependency), opens the page with a normal browser UA, injects `dist/` (`--start`
+injects before page scripts, like `@run-at document-start`), and prints
 rows / badges / covered / stale / unconverted / alignment. Gate's edge blocks
 plain HTTP clients but not a real browser, so this is the reliable way to check a
 layout change against the real exchange.
@@ -302,7 +303,7 @@ src/
   lib/exchanges/          gate / mexc / binance / kucoin / generic row locators
   lib/coininfo.ts         deposit/withdraw per coin + chain (all exchanges)
   lib/panel.ts            shadow-DOM panel (chains + Deposit/Withdraw buttons)
-  lib/minibook.ts         API-fed orderbook panel (Bybit canvas)
+  lib/bybit.ts            Worker-hooked converted orderbook (Bybit canvas)
   lib/simple.ts           Indodax fee + 1% margin panel
   lib/site.ts             site detection, pair parsing, deposit/withdraw URLs
 scripts/
@@ -336,8 +337,12 @@ file).
   cumulative amount, so its adapter maps columns positionally and derives the
   row value from `price × amount` instead.
 - Bybit draws its spot orderbook on a `<canvas>`, so there are no cells to
-  overlay. Its panel renders the public `/v5/market/orderbook` instead, with the
-  same IDR formatting; it shows 10 levels per side and refreshes every 3 s.
+  overlay. `lib/bybit.ts` wraps `Worker.prototype.onmessage` at document-start
+  to capture Bybit's own `spot.ob_` frames (same trick as the reference
+  `Bybit Price Interceptor`), renders 8 rows per side as Price/Qty/Total in IDR
+  with depth bars, and anchors the panel just left of the native orderbook.
+  If no worker frame arrives, it falls back to the public `/v5/market/orderbook`
+  every 3 s.
 - Indodax's finance page needs a login; logged out, the panel says so and only
   the price/1% margin are shown.
 - MEXC's asset endpoints are behind bot protection from some networks; when they

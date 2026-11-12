@@ -21,10 +21,11 @@ const DEFAULT_BUNDLE = join(import.meta.dir, '..', 'dist', 'tradecat-idr.user.js
 /** @param {string[]} argv */
 function parseArgs(argv) {
   const urls = [];
-  const flags = { bundle: DEFAULT_BUNDLE, shot: null, panelShot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150, evalFile: null, width: 1440, height: 1000 };
+  const flags = { bundle: DEFAULT_BUNDLE, shot: null, panelShot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150, evalFile: null, width: 1440, height: 1000, start: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
+    else if (arg === '--start') flags.start = true;
     else if (arg === '--bundle') flags.bundle = argv[++i];
     else if (arg === '--shot') flags.shot = argv[++i];
     else if (arg === '--panel-shot') flags.panelShot = argv[++i];
@@ -50,7 +51,7 @@ const REPORT = `(() => {
   const parse = (s) => Number(String(s).replace(/[^\\d.]/g, ''));
   const bookHost = document.querySelector('#tradecat-book-host');
   const apiRows = bookHost && bookHost.shadowRoot ? bookHost.shadowRoot.querySelectorAll('.row').length : 0;
-  const rows = apiRows ? [] : [...document.querySelectorAll('[class*="depth-list-item"], [class*="orderbookItem"], [class*="orderbook-progress"], [class*="ReactVirtualized__Grid__innerScrollContainer"] > div')];
+  const rows = apiRows ? [] : [...document.querySelectorAll('[class*="depth-list-item"], [class*="orderbookItem"], [class*="orderbook"] [class*="row-content"], [class*="ReactVirtualized__Grid__innerScrollContainer"] > div')];
   const badges = [...document.querySelectorAll('.tc-idr-price')].filter((b) => b.isConnected);
   const volumes = [...document.querySelectorAll('.tc-idr-volume')].filter((b) => b.isConnected && b.getBoundingClientRect().width > 0);
   let covered = 0, stale = 0, unconverted = 0, maxDy = 0, volumeRows = 0, hiddenTotals = 0;
@@ -219,11 +220,18 @@ async function openPage(url, flags) {
   await send('Page.enable');
   await send('Runtime.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: flags.width, height: flags.height, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url });
-  await sleep(flags.wait);
 
   const bundle = readFileSync(flags.bundle, 'utf8');
-  await evaluate(`${bundle}\n;1`);
+  if (flags.start) {
+    // Inject before any page script runs, like @run-at document-start.
+    await send('Page.addScriptToEvaluateOnNewDocument', { source: `${bundle}\n;1` });
+    await send('Page.navigate', { url });
+    await sleep(flags.wait);
+  } else {
+    await send('Page.navigate', { url });
+    await sleep(flags.wait);
+    await evaluate(`${bundle}\n;1`);
+  }
   await sleep(flags.settle);
 
   const samples = [];

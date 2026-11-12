@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.4.0
+// @version      0.4.1
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com, mexc.fm, binance.com, kucoin.com and bybit.com; Indodax gets a compact fee + 1% margin readout.
 // @author       sulthonuladib
 // @license      MIT
@@ -937,7 +937,9 @@ coin:
 
   // src/lib/exchanges/binance.ts
   var ROW_SELECTORS = [
-    '[class*="orderbook-progress" i]',
+    '[class*="orderbook" i] [class*="row-content" i]',
+    '[class*="progress-container" i] > [class*="row-content" i]',
+    '[class*="row-content" i]',
     '[class*="orderbook-row" i]',
     '[class*="orderbook-item" i]'
   ];
@@ -1642,83 +1644,152 @@ coin:
     };
   }
 
-  // src/lib/minibook.ts
-  var POS_KEY = "ui.book.pos";
-  var COLLAPSE_KEY = "ui.book.collapsed";
-  var ROWS_PER_SIDE = 10;
-  var REFRESH_MS = 3000;
+  // src/lib/bybit.ts
+  var ROWS = 8;
+  var WIDTH = 318;
+  var POLL_FALLBACK_MS = 4000;
+  var POLL_INTERVAL_MS = 3000;
+  var COLLAPSE_KEY = "ui.bybit.collapsed";
+  var installed = false;
+  var latest = null;
+  var restDepth = null;
+  var listeners2 = new Set;
+  function ingest(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b))
+      return;
+    const asks = a.filter((row) => Array.isArray(row) && row.length >= 2);
+    const bids = b.filter((row) => Array.isArray(row) && row.length >= 2);
+    if (!asks.length && !bids.length)
+      return;
+    latest = { a: asks, b: bids, at: Date.now() };
+    for (const listener of listeners2)
+      listener();
+  }
+  function installBybitDepthHook() {
+    if (installed)
+      return;
+    if (typeof Worker === "undefined")
+      return;
+    installed = true;
+    try {
+      const proto = Worker.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(proto, "onmessage");
+      if (!descriptor?.get || !descriptor.set)
+        return;
+      Object.defineProperty(proto, "onmessage", {
+        configurable: true,
+        enumerable: descriptor.enumerable ?? true,
+        get: descriptor.get,
+        set(handler) {
+          const wrapped = function(event) {
+            try {
+              const message = event?.data;
+              if (message && message.topic === "spot.ob_") {
+                const data = message.data?.data ?? message.data;
+                ingest(data?.a, data?.b);
+              }
+            } catch {}
+            return typeof handler === "function" ? handler.call(this, event) : undefined;
+          };
+          return descriptor.set?.call(this, wrapped);
+        }
+      });
+    } catch {}
+  }
   var CSS = `
 :host { all: initial; }
 .panel {
   position: fixed;
-  z-index: 2147482999;
-  width: 268px;
-  font: 11px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  z-index: 2147483000;
+  width: 318px;
+  display: flex;
+  flex-direction: column;
+  font: 12px/1.4 Inter, Arial, ui-sans-serif, system-ui, sans-serif;
   color: #e6edf3;
-  background: rgba(13, 17, 23, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(6px);
+  background: #0e0f13;
+  border: 1px solid #24262d;
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
   overflow: hidden;
   user-select: none;
 }
-.panel.pos-bottom-left { left: 14px; bottom: 14px; }
-.panel.pos-bottom-right { right: 14px; bottom: 14px; }
-.panel.pos-top-left { left: 14px; top: 70px; }
-.panel.pos-top-right { right: 14px; top: 70px; }
-.head { display: flex; align-items: center; gap: 4px; padding: 6px 8px; cursor: move; background: rgba(255, 255, 255, 0.04); }
-.pair { font-weight: 700; letter-spacing: 0.02em; }
+.panel[data-collapsed="true"] .cols,
+.panel[data-collapsed="true"] .rows { display: none; }
+.head {
+  display: flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 8px; flex: none;
+  background: #12141a; border-bottom: 1px solid #1c1e24;
+  cursor: default;
+}
+.title { font-weight: 600; color: #c9d1d9; letter-spacing: 0.02em; }
+.pair { color: #8b949e; font-size: 11px; }
 .grow { flex: 1; }
-.icon { all: unset; cursor: pointer; padding: 0 4px; border-radius: 4px; color: #8b949e; font-size: 13px; line-height: 1; }
-.icon:hover { color: #e6edf3; background: rgba(255, 255, 255, 0.08); }
-.body { padding: 4px 6px 6px; }
-.panel[data-collapsed="true"] .body, .panel[data-collapsed="true"] .foot { display: none; }
-.cols, .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 4px; align-items: center; }
-.cols { color: #6e7681; font-size: 9px; padding: 2px 4px; }
-.cols span:nth-child(2), .cols span:nth-child(3), .row span:nth-child(2), .row span:nth-child(3) { text-align: right; }
-.row { padding: 1px 4px; border-radius: 3px; font-variant-numeric: tabular-nums; }
-.row.ask .px { color: #ff7b72; }
-.row.bid .px { color: #3fb950; }
-.row .idr { color: #ead05a; }
-.row .tot { color: #8b949e; }
-.mid { margin: 3px 0; padding: 3px 4px; border-top: 1px solid rgba(255,255,255,0.08); border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; gap: 6px; align-items: baseline; }
-.mid b { font-size: 13px; font-variant-numeric: tabular-nums; }
-.mid span { color: #8b949e; margin-left: auto; }
-.foot { font-size: 9px; color: #6e7681; padding: 0 8px 6px; display: flex; gap: 6px; }
-.foot .err { color: #d29922; }
+.icon {
+  all: unset; cursor: pointer; padding: 0 4px; border-radius: 4px;
+  color: #8b949e; font-size: 13px; line-height: 1;
+}
+.icon:hover { color: #e6edf3; background: rgba(255,255,255,0.08); }
+.rate { color: #6e7681; font-size: 10px; }
+.cols {
+  display: grid; grid-template-columns: 1fr 88px 96px; gap: 0 4px;
+  padding: 3px 8px; flex: none;
+  color: #6e7681; font-size: 10px; border-bottom: 1px solid #1c1e24;
+}
+.cols span:nth-child(2), .cols span:nth-child(3) { text-align: right; }
+.rows { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.sell, .buy { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.row {
+  position: relative; flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 1fr 88px 96px; gap: 0 4px;
+  align-items: center; padding: 0 8px; overflow: hidden;
+}
+.row .depth {
+  position: absolute; right: 0; top: 0; height: 100%;
+  opacity: 0.22; z-index: 1; transition: width 0.15s ease-out;
+}
+.row.sell .depth { background: #ef454a; }
+.row.buy .depth { background: #20b26c; }
+.row .v { position: relative; z-index: 2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row .v.price { color: #ead05a; }
+.row .v.qty, .row .v.total { color: #ead05a; text-align: right; }
+.mid {
+  flex: none; display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 8px; margin: 1px 0;
+  border-top: 1px solid #24262d; border-bottom: 1px solid #24262d;
+}
+.mid .cur { color: #ebd61e; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mid .src { margin-left: auto; color: #6e7681; font-size: 10px; }
+.empty { padding: 8px; color: #6e7681; font-size: 11px; }
 `;
-  var fmtUsdt = (value) => {
-    const decimals = Math.abs(value) >= 1 ? Math.abs(value) >= 1000 ? 2 : 4 : 8;
-    return value.toLocaleString("en-US", { maximumFractionDigits: decimals });
-  };
-  function parseLevels(raw) {
-    if (!Array.isArray(raw))
-      return [];
-    const levels = [];
-    for (const entry of raw) {
-      if (!Array.isArray(entry))
-        continue;
-      const price = Number(entry[0]);
-      const size = Number(entry[1]);
-      if (!Number.isFinite(price) || !Number.isFinite(size) || price <= 0)
-        continue;
-      levels.push({ price, size });
-    }
-    return levels;
+  function num(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
-  async function fetchBook(site, base, quote) {
-    const symbol = `${base}${quote}`;
-    if (site === "bybit") {
-      const body = await requestJson(`https://api.bybit.com/v5/market/orderbook?category=spot&symbol=${encodeURIComponent(symbol)}&limit=50`, 1e4);
-      const result = body?.result;
-      if (!result)
-        return null;
-      return { asks: parseLevels(result.a), bids: parseLevels(result.b) };
-    }
-    return null;
+  var currency = (value) => formatIdr(value, { prefix: "", decimals: 2 });
+  var compact = (value) => formatIdr(value, { mode: "compact" });
+  function convertSide(levels, rate, side) {
+    const top = levels.slice(0, ROWS);
+    let cumulative = 0;
+    const rows = top.map(([priceRaw, qtyRaw]) => {
+      const price = num(priceRaw);
+      const qty = num(qtyRaw);
+      cumulative += qty;
+      const priceIdr = price * rate;
+      const totalIdr = cumulative * priceIdr;
+      return {
+        price: currency(priceIdr),
+        qty: compact(qty * priceIdr),
+        total: compact(totalIdr),
+        raw: totalIdr
+      };
+    });
+    let max = 0;
+    for (const row of rows)
+      max = Math.max(max, row.raw);
+    const converted = rows.map(({ raw, ...row }) => ({ ...row, pct: max > 0 ? raw / max * 100 : 0 }));
+    return side === "sell" ? converted.reverse() : converted;
   }
-  function mountApiBook(options) {
+  function mountBybitBook() {
     const host = document.createElement("div");
     host.id = "tradecat-book-host";
     const shadow = host.attachShadow({ mode: "open" });
@@ -1728,133 +1799,154 @@ coin:
     panel.className = "panel";
     panel.innerHTML = `
     <div class="head">
+      <span class="title">Converted IDR</span>
       <span class="pair">—</span>
       <span class="grow"></span>
-      <button class="icon" data-act="refresh" title="Refresh orderbook">↻</button>
+      <span class="rate"></span>
+      <button class="icon" data-act="refresh" title="Refresh">↻</button>
       <button class="icon" data-act="collapse" title="Collapse">−</button>
     </div>
-    <div class="body">
-      <div class="cols"><span>Price</span><span>IDR</span><span>Total IDR</span></div>
-      <div class="asks"></div>
-      <div class="mid"><b>—</b><span></span></div>
-      <div class="bids"></div>
-    </div>
-    <div class="foot"><span class="status">loading…</span><span class="grow"></span><span class="rate"></span></div>`;
+    <div class="cols"><span>Price (IDR)</span><span>Qty (IDR)</span><span>Total (IDR)</span></div>
+    <div class="rows">
+      <div class="sell"></div>
+      <div class="mid"><span class="cur">—</span><span class="src"></span></div>
+      <div class="buy"></div>
+    </div>`;
     shadow.append(style, panel);
     const $ = (selector) => panel.querySelector(selector);
     const pairEl = $(".pair");
-    const asksEl = $(".asks");
-    const bidsEl = $(".bids");
-    const midEl = $(".mid b");
-    const spreadEl = $(".mid span");
-    const statusEl = $(".status");
     const rateEl = $(".rate");
-    const footEl = $(".foot");
+    const sellEl = $(".sell");
+    const buyEl = $(".buy");
+    const curEl = $(".mid .cur");
+    const srcEl = $(".mid .src");
+    const sellRows = Array.from({ length: ROWS }, () => makeRow("sell"));
+    const buyRows = Array.from({ length: ROWS }, () => makeRow("buy"));
+    sellEl.append(...sellRows.map((row) => row.el));
+    buyEl.append(...buyRows.map((row) => row.el));
+    let stopped = false;
+    let scheduled = false;
+    let pollTimer = null;
+    let fallbackTimer = null;
+    let anchorTimer = null;
     let base = "";
     let quote = "";
-    let timer = null;
-    let busy = false;
-    let stopped = false;
-    let lastUpdated = 0;
-    const applyPosition = () => {
-      const saved = getStored(POS_KEY, null);
-      panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
-      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
-        panel.style.left = `${saved.left}px`;
-        panel.style.top = `${saved.top}px`;
-        panel.style.right = "auto";
-        panel.style.bottom = "auto";
-        return;
-      }
-      panel.style.left = "";
-      panel.style.top = "";
-      panel.style.right = "";
-      panel.style.bottom = "";
-      panel.classList.add(`pos-${options.position || "bottom-left"}`);
-    };
-    const renderSide = (target, levels, kind, rate, priceIdr, totalIdr, priceColor, volumeColor) => {
-      target.textContent = "";
-      if (!levels.length)
-        return;
-      let cumulativeUsdt = 0;
-      const rows = levels.slice(0, ROWS_PER_SIDE).map((level) => {
-        cumulativeUsdt += level.price * level.size;
-        return { level, totalIdrValue: cumulativeUsdt * rate };
-      });
-      if (kind === "ask")
-        rows.reverse();
-      for (const { level, totalIdrValue } of rows) {
-        const row = document.createElement("div");
-        row.className = `row ${kind}`;
-        const px = document.createElement("span");
-        px.className = "px";
-        px.textContent = fmtUsdt(level.price);
-        const idr = document.createElement("span");
-        idr.className = "idr";
-        if (priceColor)
-          idr.style.color = priceColor;
-        idr.textContent = rate > 0 ? priceIdr(level.price * rate) : "—";
-        idr.title = rate > 0 ? `1 ${quote} = ${formatIdr(rate, { mode: "full", prefix: "Rp. " })}` : "USDT/IDR rate not set";
-        const tot = document.createElement("span");
-        tot.className = "tot";
-        if (volumeColor)
-          tot.style.color = volumeColor;
-        tot.textContent = rate > 0 ? totalIdr(totalIdrValue) : "—";
-        row.append(px, idr, tot);
-        target.append(row);
-      }
-    };
-    const render = (book, error) => {
-      const config = options.getConfig();
-      const rate = currentRate().rate;
-      const priceIdr = (value) => formatIdr(value, { mode: config.priceMode, prefix: config.prefix });
-      const totalIdr = (value) => formatIdr(value, { mode: config.volumeMode, prefix: config.prefix });
-      rateEl.textContent = rate > 0 ? `1 USDT = ${formatIdr(rate, { mode: "full", prefix: "Rp. " })}` : "rate not set";
-      if (!book) {
-        asksEl.textContent = "";
-        bidsEl.textContent = "";
-        midEl.textContent = "—";
-        spreadEl.textContent = "";
-        statusEl.textContent = error ? "failed" : "no data";
-        statusEl.className = `status${error ? " err" : ""}`;
-        footEl.title = error ?? "";
-        return;
-      }
-      const priceColor = config.priceColor;
-      const volumeColor = config.volumeColor;
-      renderSide(asksEl, book.asks, "ask", rate, priceIdr, totalIdr, priceColor, volumeColor);
-      renderSide(bidsEl, book.bids, "bid", rate, priceIdr, totalIdr, priceColor, volumeColor);
-      const bestAsk = book.asks[0];
-      const bestBid = book.bids[0];
-      const mid = bestAsk && bestBid ? (bestAsk.price + bestBid.price) / 2 : bestAsk?.price ?? bestBid?.price ?? 0;
-      midEl.textContent = mid > 0 ? fmtUsdt(mid) : "—";
-      if (bestAsk && bestBid && bestBid.price > 0) {
-        const spread = (bestAsk.price - bestBid.price) / bestBid.price * 100;
-        spreadEl.textContent = `spread ${spread.toFixed(2)}%`;
-      } else {
-        spreadEl.textContent = "";
-      }
-      statusEl.textContent = lastUpdated ? `api · ${new Date(lastUpdated).toLocaleTimeString()}` : "api";
-      statusEl.className = "status";
-      footEl.title = "";
-    };
-    const load = async () => {
-      if (busy || stopped || !base)
-        return;
-      busy = true;
-      try {
-        const book = await fetchBook(options.site, base, quote);
-        if (!book || !book.asks.length && !book.bids.length) {
-          render(null, "no data");
+    function makeRow(kind) {
+      const el = document.createElement("div");
+      el.className = `row ${kind}`;
+      const depth = document.createElement("div");
+      depth.className = "depth";
+      const price = document.createElement("span");
+      price.className = "v price";
+      price.textContent = "—";
+      const qty = document.createElement("span");
+      qty.className = "v qty";
+      qty.textContent = "—";
+      const total = document.createElement("span");
+      total.className = "v total";
+      total.textContent = "—";
+      el.append(depth, price, qty, total);
+      return { el, depth, price, qty, total };
+    }
+    const writeSide = (rows, converted) => {
+      rows.forEach((row, index) => {
+        const data = converted[index];
+        if (!data) {
+          row.el.style.display = "none";
           return;
         }
-        lastUpdated = Date.now();
-        render(book);
-      } catch (error) {
-        render(null, error instanceof Error ? error.message : String(error));
-      } finally {
-        busy = false;
+        row.el.style.display = "grid";
+        row.price.textContent = data.price;
+        row.qty.textContent = data.qty;
+        row.total.textContent = data.total;
+        row.depth.style.width = `${data.pct}%`;
+        row.el.title = `${data.price} · ${data.qty} · ${data.total}`;
+      });
+    };
+    const render = () => {
+      if (stopped)
+        return;
+      const depth = latest ?? restDepth;
+      const rate = currentRate().rate;
+      pairEl.textContent = base && quote ? `${base}/${quote}` : "—";
+      rateEl.textContent = rate > 0 ? `1 USDT = ${formatIdr(rate, { mode: "full", prefix: "Rp. " })}` : "rate not set";
+      if (!depth || rate <= 0) {
+        for (const row of [...sellRows, ...buyRows])
+          row.el.style.display = "none";
+        curEl.textContent = "—";
+        srcEl.textContent = depth ? "USDT/IDR rate not set" : "waiting for depth…";
+        return;
       }
+      const sell = convertSide(depth.a, rate, "sell");
+      const buy = convertSide(depth.b, rate, "buy");
+      writeSide(sellRows, sell);
+      writeSide(buyRows, buy);
+      const bestAsk = num(depth.a[0]?.[0]);
+      const bestBid = num(depth.b[0]?.[0]);
+      const mid = bestAsk && bestBid ? (bestAsk + bestBid) / 2 : bestAsk || bestBid;
+      curEl.textContent = mid > 0 ? currency(mid * rate) : "—";
+      srcEl.textContent = latest ? "live worker" : "rest fallback";
+    };
+    const schedule = () => {
+      if (scheduled || stopped)
+        return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        render();
+      });
+    };
+    const onDepth = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      restDepth = null;
+      schedule();
+    };
+    const bybitSymbol = () => `${base}${quote}`;
+    const loadRest = async () => {
+      if (stopped || !base)
+        return;
+      try {
+        const body = await requestJson(`https://api.bybit.com/v5/market/orderbook?category=spot&symbol=${encodeURIComponent(bybitSymbol())}&limit=50`, 1e4);
+        const result = body?.result;
+        if (!result || latest)
+          return;
+        restDepth = { a: result.a ?? [], b: result.b ?? [], at: Date.now() };
+        schedule();
+      } catch {}
+    };
+    const startFallback = () => {
+      if (pollTimer || latest || stopped)
+        return;
+      loadRest();
+      pollTimer = setInterval(() => void loadRest(), POLL_INTERVAL_MS);
+    };
+    const anchor = () => {
+      if (stopped)
+        return;
+      const area = document.querySelector("#orderBookArea") ?? document.querySelector(".order-book-area");
+      const rect = area?.getBoundingClientRect();
+      if (!rect || rect.width < 100 || rect.height < 80) {
+        panel.style.left = "auto";
+        panel.style.top = "auto";
+        panel.style.right = "14px";
+        panel.style.bottom = "14px";
+        panel.style.height = "420px";
+        return;
+      }
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+      panel.style.top = `${Math.round(rect.top)}px`;
+      const height = Math.max(280, Math.min(rect.height, window.innerHeight - rect.top - 8));
+      panel.style.height = `${Math.round(height)}px`;
+      const left = rect.left - WIDTH - 6;
+      panel.style.left = `${Math.round(left >= 8 ? left : Math.max(8, rect.right + 6))}px`;
     };
     const syncPair = () => {
       const pair = currentPair();
@@ -1867,28 +1959,22 @@ coin:
         return;
       base = pair.base;
       quote = pair.quote;
-      pairEl.textContent = `${base}/${quote}`;
-      asksEl.textContent = "";
-      bidsEl.textContent = "";
-      statusEl.textContent = "loading…";
-      load();
-    };
-    const schedule = () => {
-      if (timer)
-        clearInterval(timer);
-      timer = setInterval(() => {
-        if (document.hidden)
-          return;
-        load();
-      }, REFRESH_MS);
+      latest = null;
+      restDepth = null;
+      schedule();
+      if (fallbackTimer)
+        clearTimeout(fallbackTimer);
+      fallbackTimer = setTimeout(startFallback, POLL_FALLBACK_MS);
     };
     panel.addEventListener("click", (event) => {
       const target = event.target.closest("[data-act]");
       if (!target)
         return;
       const action = target.dataset["act"];
-      if (action === "refresh")
-        load();
+      if (action === "refresh") {
+        loadRest();
+        schedule();
+      }
       if (action === "collapse") {
         const collapsed = panel.dataset["collapsed"] !== "true";
         panel.dataset["collapsed"] = String(collapsed);
@@ -1896,73 +1982,56 @@ coin:
         setStored(COLLAPSE_KEY, collapsed);
       }
     });
-    const head = $(".head");
-    let drag = null;
-    head.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("[data-act]"))
-        return;
-      const rect = panel.getBoundingClientRect();
-      drag = { startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top };
-      head.setPointerCapture(event.pointerId);
-      event.preventDefault();
-    });
-    head.addEventListener("pointermove", (event) => {
-      if (!drag)
-        return;
-      const left = Math.max(0, Math.min(window.innerWidth - 80, drag.left + event.clientX - drag.startX));
-      const top = Math.max(0, Math.min(window.innerHeight - 40, drag.top + event.clientY - drag.startY));
-      panel.style.left = `${left}px`;
-      panel.style.top = `${top}px`;
-      panel.style.right = "auto";
-      panel.style.bottom = "auto";
-    });
-    head.addEventListener("pointerup", (event) => {
-      if (!drag)
-        return;
-      const rect = panel.getBoundingClientRect();
-      setStored(POS_KEY, { left: Math.round(rect.left), top: Math.round(rect.top) });
-      drag = null;
-      try {
-        head.releasePointerCapture(event.pointerId);
-      } catch {}
-    });
     const mount = () => {
       if (!document.body) {
         requestAnimationFrame(mount);
         return;
       }
       document.body.appendChild(host);
-      applyPosition();
       if (getStored(COLLAPSE_KEY, false)) {
         panel.dataset["collapsed"] = "true";
         $('[data-act="collapse"]').textContent = "+";
       }
       syncPair();
+      anchor();
+      listeners2.add(onDepth);
+      window.addEventListener("resize", anchor, { passive: true });
+      anchorTimer = setInterval(anchor, 800);
+      if (fallbackTimer)
+        clearTimeout(fallbackTimer);
+      fallbackTimer = setTimeout(startFallback, POLL_FALLBACK_MS);
       schedule();
     };
     mount();
     return {
       refresh: () => {
-        applyPosition();
         syncPair();
-        load();
+        anchor();
+        schedule();
       },
       destroy: () => {
         stopped = true;
-        if (timer)
-          clearInterval(timer);
+        listeners2.delete(onDepth);
+        window.removeEventListener("resize", anchor);
+        if (pollTimer)
+          clearInterval(pollTimer);
+        if (fallbackTimer)
+          clearTimeout(fallbackTimer);
+        if (anchorTimer)
+          clearInterval(anchorTimer);
         host.remove();
       },
       describe: () => {
-        const rows = asksEl.children.length + bidsEl.children.length;
-        const first = asksEl.lastElementChild?.textContent ?? "";
-        return { adapter: `${options.site}:api-book`, rows, sample: first ? [first] : [] };
+        const depth = latest ?? restDepth;
+        const rows = depth ? Math.min(depth.a.length, ROWS) + Math.min(depth.b.length, ROWS) : 0;
+        const sample = sellRows[ROWS - 1]?.el.textContent?.trim().replace(/\s+/g, " ") ?? "";
+        return { adapter: "bybit:converted-book", rows, sample: sample ? [sample] : [] };
       }
     };
   }
 
   // src/lib/simple.ts
-  var POS_KEY2 = "ui.simple.pos";
+  var POS_KEY = "ui.simple.pos";
   var COLLAPSE_KEY2 = "ui.simple.collapsed";
   var FEE_TTL = 10 * 60 * 1000;
   var TICKER_MS = 15000;
@@ -2083,7 +2152,7 @@ coin:
     let stopped = false;
     let timer = null;
     const applyPosition = () => {
-      const saved = getStored(POS_KEY2, null);
+      const saved = getStored(POS_KEY, null);
       panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
       if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
         panel.style.left = `${saved.left}px`;
@@ -2223,7 +2292,7 @@ coin:
       if (!drag)
         return;
       const rect = panel.getBoundingClientRect();
-      setStored(POS_KEY2, { left: Math.round(rect.left), top: Math.round(rect.top) });
+      setStored(POS_KEY, { left: Math.round(rect.left), top: Math.round(rect.top) });
       drag = null;
       try {
         head.releasePointerCapture(event.pointerId);
@@ -2268,7 +2337,7 @@ coin:
   var CACHE_TTL = 10 * 60 * 1000;
   var CACHE_PREFIX = "coininfo.v2";
   var cacheKey = (site, coin) => `${CACHE_PREFIX}.${site}.${coin}`;
-  var num = (value) => {
+  var num2 = (value) => {
     if (value === null || value === undefined || value === "")
       return null;
     const parsed = Number(value);
@@ -2318,16 +2387,16 @@ coin:
     if (feeBody && (Number(feeBody?.resMsg?.code) === 1000 || /log ?in|login first/i.test(message))) {
       needsLogin = true;
     } else if (feeBody) {
-      priceUsdt = num(feeBody?.datas?.rate_usdt ?? feeBody?.datas?.rateUsdt);
+      priceUsdt = num2(feeBody?.datas?.rate_usdt ?? feeBody?.datas?.rateUsdt);
       for (const chain of listOf(feeBody?.datas?.chains)) {
         const name = chainNameOf(chain);
         if (!name)
           continue;
         fees.set(name, {
-          fee: num(chain?.withdraw_txfee ?? chain?.withdraw_fee ?? chain?.withdrawFix),
-          percent: num(chain?.withdraw_percent ?? chain?.withdrawPercent),
-          min: num(chain?.withdraw_min ?? chain?.withdrawMin),
-          max: num(chain?.withdraw_max ?? chain?.withdrawMax)
+          fee: num2(chain?.withdraw_txfee ?? chain?.withdraw_fee ?? chain?.withdrawFix),
+          percent: num2(chain?.withdraw_percent ?? chain?.withdrawPercent),
+          min: num2(chain?.withdraw_min ?? chain?.withdrawMin),
+          max: num2(chain?.withdraw_max ?? chain?.withdrawMax)
         });
       }
     }
@@ -2346,8 +2415,8 @@ coin:
         withdrawDelayed: asBool(raw?.withdraw_delayed, false),
         fee: fee?.fee ?? null,
         feePercent: fee?.percent ?? null,
-        minWithdraw: num(raw?.withdraw_amount_min ?? raw?.withdraw_min) ?? fee?.min ?? null,
-        maxWithdraw: num(raw?.withdraw_amount_max ?? raw?.withdraw_max) ?? fee?.max ?? null
+        minWithdraw: num2(raw?.withdraw_amount_min ?? raw?.withdraw_min) ?? fee?.min ?? null,
+        maxWithdraw: num2(raw?.withdraw_amount_max ?? raw?.withdraw_max) ?? fee?.max ?? null
       });
     }
     for (const [name, fee] of fees) {
@@ -2399,10 +2468,10 @@ coin:
         withdraw: asBool(raw?.enableWithdraw ?? raw?.withdrawEnable ?? raw?.withdraw_enable, true),
         depositDelayed: asBool(raw?.depositDelayed ?? raw?.deposit_delayed, false),
         withdrawDelayed: asBool(raw?.withdrawDelayed ?? raw?.withdraw_delayed, false),
-        fee: num(raw?.withdrawFee ?? raw?.withdraw_fee ?? raw?.fee),
-        feePercent: num(raw?.withdrawFeePercent ?? raw?.withdrawPercent ?? raw?.withdraw_percent),
-        minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min ?? raw?.minWithdraw),
-        maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max ?? raw?.maxWithdraw)
+        fee: num2(raw?.withdrawFee ?? raw?.withdraw_fee ?? raw?.fee),
+        feePercent: num2(raw?.withdrawFeePercent ?? raw?.withdrawPercent ?? raw?.withdraw_percent),
+        minWithdraw: num2(raw?.withdrawMin ?? raw?.withdraw_min ?? raw?.minWithdraw),
+        maxWithdraw: num2(raw?.withdrawMax ?? raw?.withdraw_max ?? raw?.maxWithdraw)
       });
     }
     return {
@@ -2410,7 +2479,7 @@ coin:
       deposit: coinsDeposit(chains, asBool(data?.enableDeposit, true)),
       withdraw: coinsWithdraw(chains, asBool(data?.enableWithdraw, true)),
       chains,
-      priceUsdt: num(data?.currencyPrice ?? data?.currency_price),
+      priceUsdt: num2(data?.currencyPrice ?? data?.currency_price),
       source: "mexc:currency/v3",
       updatedAt: Date.now(),
       needsLogin: false
@@ -2443,10 +2512,10 @@ coin:
         withdraw: asBool(raw?.withdrawEnable ?? raw?.withdraw_enable, true),
         depositDelayed: asBool(raw?.depositDelayed ?? raw?.deposit_delayed, false),
         withdrawDelayed: asBool(raw?.withdrawDelayed ?? raw?.withdraw_delayed, false),
-        fee: num(raw?.withdrawFee ?? raw?.withdraw_fee),
+        fee: num2(raw?.withdrawFee ?? raw?.withdraw_fee),
         feePercent: null,
-        minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min),
-        maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max)
+        minWithdraw: num2(raw?.withdrawMin ?? raw?.withdraw_min),
+        maxWithdraw: num2(raw?.withdrawMax ?? raw?.withdraw_max)
       });
     }
     return {
@@ -2487,10 +2556,10 @@ coin:
         withdraw: asBool(raw?.isWithdrawEnabled ?? raw?.withdrawEnabled, true),
         depositDelayed: false,
         withdrawDelayed: false,
-        fee: num(raw?.withdrawMinFee ?? raw?.withdrawalMinFee ?? raw?.withdrawFee),
+        fee: num2(raw?.withdrawMinFee ?? raw?.withdrawalMinFee ?? raw?.withdrawFee),
         feePercent: null,
-        minWithdraw: num(raw?.withdrawMinSize ?? raw?.withdrawalMinSize),
-        maxWithdraw: num(raw?.withdrawMaxSize ?? raw?.withdrawalMaxSize)
+        minWithdraw: num2(raw?.withdrawMinSize ?? raw?.withdrawalMinSize),
+        maxWithdraw: num2(raw?.withdrawMaxSize ?? raw?.withdrawalMaxSize)
       });
     }
     return {
@@ -2534,10 +2603,10 @@ coin:
         withdraw: asBool(raw?.chainWithdraw ?? raw?.withdrawEnable, true),
         depositDelayed: false,
         withdrawDelayed: false,
-        fee: num(raw?.withdrawFee ?? raw?.withdraw_fee),
+        fee: num2(raw?.withdrawFee ?? raw?.withdraw_fee),
         feePercent: null,
-        minWithdraw: num(raw?.withdrawMin ?? raw?.withdraw_min),
-        maxWithdraw: num(raw?.withdrawMax ?? raw?.withdraw_max)
+        minWithdraw: num2(raw?.withdrawMin ?? raw?.withdraw_min),
+        maxWithdraw: num2(raw?.withdrawMax ?? raw?.withdraw_max)
       });
     }
     return {
@@ -2607,7 +2676,7 @@ coin:
       const rows = await requestJson(gateTickerUrl(coin), 8000);
       const pair = `${coin.toUpperCase()}_USDT`;
       const row = Array.isArray(rows) ? rows.find((item) => String(item?.currency_pair).toUpperCase() === pair) : null;
-      return num(row?.last);
+      return num2(row?.last);
     } catch {
       return null;
     }
@@ -2615,7 +2684,7 @@ coin:
   async function mexcPriceUsdt(coin) {
     try {
       const raw = await requestJson(mexcTickerUrl(coin), 8000);
-      return num(raw?.price);
+      return num2(raw?.price);
     } catch {
       return null;
     }
@@ -2623,7 +2692,7 @@ coin:
   async function binancePriceUsdt(coin) {
     try {
       const raw = await requestJson(binanceTickerUrl(coin), 8000);
-      return num(raw?.price);
+      return num2(raw?.price);
     } catch {
       return null;
     }
@@ -2631,7 +2700,7 @@ coin:
   async function kucoinPriceUsdt(coin) {
     try {
       const raw = await requestJson(kucoinTickerUrl(coin), 8000);
-      return num(raw?.data?.price);
+      return num2(raw?.data?.price);
     } catch {
       return null;
     }
@@ -2639,7 +2708,7 @@ coin:
   async function bybitPriceUsdt(coin) {
     try {
       const raw = await requestJson(bybitTickerUrl(coin), 8000);
-      return num(raw?.result?.list?.[0]?.lastPrice);
+      return num2(raw?.result?.list?.[0]?.lastPrice);
     } catch {
       return null;
     }
@@ -2762,7 +2831,7 @@ coin:
   }
 
   // src/lib/panel.ts
-  var POS_KEY3 = "ui.panel.pos";
+  var POS_KEY2 = "ui.panel.pos";
   var COLLAPSE_KEY3 = "ui.panel.collapsed";
   var CSS3 = `
 :host { all: initial; }
@@ -2910,7 +2979,7 @@ coin:
     let info = null;
     let loading = false;
     const applyPosition = () => {
-      const saved = getStored(POS_KEY3, null);
+      const saved = getStored(POS_KEY2, null);
       panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
       if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
         panel.style.left = `${saved.left}px`;
@@ -3104,7 +3173,7 @@ coin:
       if (!drag)
         return;
       const rect = panel.getBoundingClientRect();
-      setStored(POS_KEY3, { left: Math.round(rect.left), top: Math.round(rect.top) });
+      setStored(POS_KEY2, { left: Math.round(rect.left), top: Math.round(rect.top) });
       drag = null;
       try {
         head.releasePointerCapture(event.pointerId);
@@ -3134,7 +3203,7 @@ coin:
   }
 
   // src/main.ts
-  function num2(key, fallback) {
+  function num3(key, fallback) {
     const raw = getStored(key, fallback);
     const value = Number(raw);
     return Number.isFinite(value) ? value : fallback;
@@ -3226,7 +3295,7 @@ coin:
     const site = detectSite();
     initRate();
     const simple = isSimpleSite(site) ? mountSimpleHud({ getConfig: () => ({ position: panelConfig().position }) }) : null;
-    const apiBook = usesApiBook(site) ? mountApiBook({ site, getConfig: orderbookConfig, position: "bottom-right" }) : null;
+    const apiBook = usesApiBook(site) ? mountBybitBook() : null;
     const orderbook = simple || apiBook ? null : startOrderbook({ site, getRate: rateValue, getConfig: orderbookConfig });
     const describe = () => orderbook ? describeOrderbook(site) : simple ? simple.describe() : apiBook.describe();
     const rescan = () => {
@@ -3243,9 +3312,9 @@ coin:
     const panel = panelConfig().enabled && !simple ? mountPanel({ site, getConfig: panelConfig }) : null;
     onRateChange(rescan);
     getUsdtIdrRate({
-      ttlHours: num2("idr.ttlHours", 6),
+      ttlHours: num3("idr.ttlHours", 6),
       enableNetwork: bool("idr.enableNetworkRate", false),
-      fallbackRate: num2("idr.fallbackRate", 18000)
+      fallbackRate: num3("idr.fallbackRate", 18000)
     }).then((snapshot) => {
       log(`site=${site} rate=${snapshot.rate} (${snapshot.source})`);
     });
@@ -3279,6 +3348,8 @@ coin:
       }
     });
   }
+  if (detectSite() === "bybit")
+    installBybitDepthHook();
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => void boot(), { once: true });
   } else {
