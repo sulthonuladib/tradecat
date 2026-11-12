@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.4.2
+// @version      0.4.3
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com, mexc.fm, binance.com, kucoin.com and bybit.com; Indodax gets a compact fee + 1% margin readout.
 // @author       sulthonuladib
 // @license      MIT
@@ -1710,11 +1710,21 @@ coin:
   }
 
   // src/lib/bybit.ts
-  var ROWS = 8;
-  var WIDTH = 318;
+  var PANEL_WIDTH = 316;
+  var GAP = 4;
+  var HEADER_H = 42;
+  var SUB_H = 30;
+  var COLS_H = 32;
+  var MID_H = 40;
+  var MIN_ROW_H = 24;
+  var MAX_ROWS = 24;
   var POLL_FALLBACK_MS = 4000;
   var POLL_INTERVAL_MS = 3000;
   var COLLAPSE_KEY = "ui.bybit.collapsed";
+  var POS_KEY = "ui.bybit.pos";
+  var SELL_COLOR = "#f63649";
+  var BUY_COLOR = "#06c167";
+  var ACCENT = "#ff9c2e";
   var installed = false;
   var latest = null;
   var restDepth = null;
@@ -1764,76 +1774,110 @@ coin:
   var CSS = `
 :host { all: initial; }
 .panel {
-  position: fixed;
-  z-index: 2147483000;
-  width: 318px;
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  font: 12px/1.4 Inter, Arial, ui-sans-serif, system-ui, sans-serif;
-  color: #e6edf3;
-  background: #0e0f13;
-  border: 1px solid #24262d;
-  border-radius: 6px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  font: 12px/1.2 Inter, -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
+  color: #ffffff;
+  background: #101014;
+  border-radius: 0;
   overflow: hidden;
   user-select: none;
 }
+.panel[data-collapsed="true"] .sub,
 .panel[data-collapsed="true"] .cols,
 .panel[data-collapsed="true"] .rows { display: none; }
 .head {
-  display: flex; align-items: center; gap: 6px;
-  height: 32px; padding: 0 8px; flex: none;
-  background: #12141a; border-bottom: 1px solid #1c1e24;
-  cursor: default;
+  display: flex; align-items: stretch; flex: none;
+  height: ${HEADER_H}px; padding-left: 12px;
+  background: #101014;
+  cursor: move;
 }
-.title { font-weight: 600; color: #c9d1d9; letter-spacing: 0.02em; }
-.pair { color: #8b949e; font-size: 11px; }
-.grow { flex: 1; }
+.tabs { display: flex; align-items: stretch; gap: 16px; flex: 1; }
+.tab {
+  display: flex; align-items: flex-start; padding-top: 12px;
+  font-size: 14px; font-weight: 500; line-height: 18px;
+  color: #ffffff; border-bottom: 2px solid transparent;
+}
+.tab.active { border-bottom-color: ${ACCENT}; }
+.tab.muted { color: #6a6e73; cursor: default; pointer-events: none; }
+.head .icons { display: flex; align-items: center; gap: 2px; padding-right: 4px; }
 .icon {
-  all: unset; cursor: pointer; padding: 0 4px; border-radius: 4px;
-  color: #8b949e; font-size: 13px; line-height: 1;
+  all: unset; cursor: pointer; padding: 4px 5px; border-radius: 4px;
+  color: #6a6e73; font-size: 13px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.icon:hover { color: #e6edf3; background: rgba(255,255,255,0.08); }
-.rate { color: #6e7681; font-size: 10px; }
+.icon:hover { color: #ffffff; background: rgba(255,255,255,0.06); }
+.sub {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  height: ${SUB_H}px; padding: 0 12px;
+  color: #6a6e73; font-size: 12px; font-weight: 500;
+}
+.sub .pair { color: #ffffff; }
+.sub .status { color: #6a6e73; }
+.sub .spacer { flex: 1; }
+.sub .rate { color: #6a6e73; font-size: 11px; }
 .cols {
-  display: grid; grid-template-columns: 1fr 88px 96px; gap: 0 4px;
-  padding: 3px 8px; flex: none;
-  color: #6e7681; font-size: 10px; border-bottom: 1px solid #1c1e24;
+  display: grid; grid-template-columns: 118px 86px 88px; gap: 0;
+  align-items: center; flex: none;
+  height: ${COLS_H}px; padding: 0 12px;
+  color: #6a6e73; font-size: 12px; font-weight: 500;
 }
 .cols span:nth-child(2), .cols span:nth-child(3) { text-align: right; }
+.cols .arrow { margin-left: 3px; font-size: 9px; }
 .rows { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .sell, .buy { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .row {
-  position: relative; flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 1fr 88px 96px; gap: 0 4px;
-  align-items: center; padding: 0 8px; overflow: hidden;
+  position: relative; flex: 1; min-height: ${MIN_ROW_H}px;
+  display: grid; grid-template-columns: 118px 86px 88px; gap: 0;
+  align-items: center; padding: 0 12px; overflow: hidden;
+  font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .row .depth {
   position: absolute; right: 0; top: 0; height: 100%;
-  opacity: 0.22; z-index: 1; transition: width 0.15s ease-out;
+  z-index: 0; transition: width 0.15s ease-out;
 }
-.row.sell .depth { background: #ef454a; }
-.row.buy .depth { background: #20b26c; }
-.row .v { position: relative; z-index: 2; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.row .v.price { color: #ead05a; }
-.row .v.qty, .row .v.total { color: #ead05a; text-align: right; }
+.row.sell .depth { background: rgba(239, 69, 74, 0.34); }
+.row.buy .depth { background: rgba(32, 178, 108, 0.34); }
+.row .v { position: relative; z-index: 1; overflow: hidden; text-overflow: ellipsis; }
+.row .v.price { color: ${SELL_COLOR}; }
+.row.buy .v.price { color: ${BUY_COLOR}; }
+.row .v.qty, .row .v.total { color: #ffffff; text-align: right; }
 .mid {
-  flex: none; display: flex; align-items: baseline; gap: 8px;
-  padding: 6px 8px; margin: 1px 0;
-  border-top: 1px solid #24262d; border-bottom: 1px solid #24262d;
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: ${MID_H}px; padding: 0 12px;
+  background: #101014;
+  border-top: 1px solid #1c1e24; border-bottom: 1px solid #1c1e24;
+  font-variant-numeric: tabular-nums;
 }
-.mid .cur { color: #ebd61e; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.mid .src { margin-left: auto; color: #6e7681; font-size: 10px; }
-.empty { padding: 8px; color: #6e7681; font-size: 11px; }
+.mid .arrow {
+  width: 0; height: 0; flex: none;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+}
+.mid.down .arrow { border-top: 8px solid ${SELL_COLOR}; }
+.mid.up .arrow { border-bottom: 8px solid ${BUY_COLOR}; }
+.mid .cur { font-size: 16px; font-weight: 600; line-height: 18px; }
+.mid.down .cur { color: ${SELL_COLOR}; }
+.mid.up .cur { color: ${BUY_COLOR}; }
+.mid .approx { color: #6a6e73; font-size: 12px; }
+.mid .spacer { flex: 1; }
 `;
   function num(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
   }
-  var currency = (value) => formatIdr(value, { prefix: "", decimals: 2 });
+  var currency = (value) => formatIdr(value, { decimals: 2 });
   var compact = (value) => formatIdr(value, { mode: "compact" });
+  var plainUsdt = (value) => {
+    const fixed = Math.abs(value) >= 1;
+    return value.toLocaleString("en-US", {
+      minimumFractionDigits: fixed ? 2 : 0,
+      maximumFractionDigits: fixed ? 2 : 8
+    });
+  };
   function convertSide(levels, rate, side) {
-    const top = levels.slice(0, ROWS);
+    const top = levels.slice(0, MAX_ROWS);
     let cumulative = 0;
     const rows = top.map(([priceRaw, qtyRaw]) => {
       const price = num(priceRaw);
@@ -1857,6 +1901,7 @@ coin:
   function mountBybitBook() {
     const host = document.createElement("div");
     host.id = "tradecat-book-host";
+    host.style.cssText = `position:fixed;z-index:2147483000;left:0;top:0;width:${PANEL_WIDTH}px;height:400px;display:none;`;
     const shadow = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = CSS;
@@ -1864,38 +1909,52 @@ coin:
     panel.className = "panel";
     panel.innerHTML = `
     <div class="head">
-      <span class="title">Converted IDR</span>
-      <span class="pair">—</span>
-      <span class="grow"></span>
-      <span class="rate"></span>
-      <button class="icon" data-act="refresh" title="Refresh">↻</button>
-      <button class="icon" data-act="collapse" title="Collapse">−</button>
+      <div class="tabs">
+        <span class="tab active">Converted IDR</span>
+        <span class="tab muted" title="Use the native panel for recent trades">Recent Trades</span>
+      </div>
+      <div class="icons">
+        <button class="icon" data-act="refresh" title="Refresh depth">↻</button>
+        <button class="icon" data-act="dock" title="Dock next to the orderbook">⊞</button>
+        <button class="icon" data-act="collapse" title="Collapse">−</button>
+      </div>
     </div>
-    <div class="cols"><span>Price (IDR)</span><span>Qty (IDR)</span><span>Total (IDR)</span></div>
+    <div class="sub">
+      <span class="pair">—</span>
+      <span class="status">waiting…</span>
+      <span class="spacer"></span>
+      <span class="rate"></span>
+    </div>
+    <div class="cols"><span>Price (IDR)</span><span>Qty (IDR)</span><span>Total (IDR)<span class="arrow">▾</span></span></div>
     <div class="rows">
       <div class="sell"></div>
-      <div class="mid"><span class="cur">—</span><span class="src"></span></div>
+      <div class="mid down"><span class="arrow"></span><span class="cur">—</span><span class="approx"></span><span class="spacer"></span></div>
       <div class="buy"></div>
     </div>`;
     shadow.append(style, panel);
     const $ = (selector) => panel.querySelector(selector);
-    const pairEl = $(".pair");
-    const rateEl = $(".rate");
+    const pairEl = $(".sub .pair");
+    const statusEl = $(".sub .status");
+    const rateEl = $(".sub .rate");
     const sellEl = $(".sell");
     const buyEl = $(".buy");
+    const midEl = $(".mid");
     const curEl = $(".mid .cur");
-    const srcEl = $(".mid .src");
-    const sellRows = Array.from({ length: ROWS }, () => makeRow("sell"));
-    const buyRows = Array.from({ length: ROWS }, () => makeRow("buy"));
+    const approxEl = $(".mid .approx");
+    const sellRows = Array.from({ length: MAX_ROWS }, () => makeRow("sell"));
+    const buyRows = Array.from({ length: MAX_ROWS }, () => makeRow("buy"));
     sellEl.append(...sellRows.map((row) => row.el));
     buyEl.append(...buyRows.map((row) => row.el));
     let stopped = false;
     let scheduled = false;
     let pollTimer = null;
     let fallbackTimer = null;
-    let anchorTimer = null;
+    let layoutTimer = null;
     let base = "";
     let quote = "";
+    let perSide = 10;
+    let manual = getStored(POS_KEY, null);
+    let lastMid = 0;
     function makeRow(kind) {
       const el = document.createElement("div");
       el.className = `row ${kind}`;
@@ -1903,19 +1962,16 @@ coin:
       depth.className = "depth";
       const price = document.createElement("span");
       price.className = "v price";
-      price.textContent = "—";
       const qty = document.createElement("span");
       qty.className = "v qty";
-      qty.textContent = "—";
       const total = document.createElement("span");
       total.className = "v total";
-      total.textContent = "—";
       el.append(depth, price, qty, total);
       return { el, depth, price, qty, total };
     }
     const writeSide = (rows, converted) => {
       rows.forEach((row, index) => {
-        const data = converted[index];
+        const data = index < perSide ? converted[index] : undefined;
         if (!data) {
           row.el.style.display = "none";
           return;
@@ -1928,6 +1984,18 @@ coin:
         row.el.title = `${data.price} · ${data.qty} · ${data.total}`;
       });
     };
+    const nativePrice = () => {
+      const el = document.querySelector("#orderBookArea .new-price .price");
+      if (!el)
+        return null;
+      const text = el.textContent ?? "";
+      const value = parseNumber(text);
+      if (!value || value <= 0)
+        return null;
+      const cls = typeof el.className === "string" ? el.className : "";
+      const up = /spot-buy|themed-text-green|color-buy/i.test(cls) || !/spot-sell/i.test(cls) && value >= lastMid;
+      return { value, up };
+    };
     const render = () => {
       if (stopped)
         return;
@@ -1935,22 +2003,29 @@ coin:
       const rate = currentRate().rate;
       pairEl.textContent = base && quote ? `${base}/${quote}` : "—";
       rateEl.textContent = rate > 0 ? `1 USDT = ${formatIdr(rate, { mode: "full", prefix: "Rp. " })}` : "rate not set";
+      statusEl.textContent = latest ? "live worker" : depth ? "rest fallback" : "waiting…";
       if (!depth || rate <= 0) {
         for (const row of [...sellRows, ...buyRows])
           row.el.style.display = "none";
         curEl.textContent = "—";
-        srcEl.textContent = depth ? "USDT/IDR rate not set" : "waiting for depth…";
+        approxEl.textContent = "";
         return;
       }
       const sell = convertSide(depth.a, rate, "sell");
       const buy = convertSide(depth.b, rate, "buy");
       writeSide(sellRows, sell);
       writeSide(buyRows, buy);
+      const native = nativePrice();
       const bestAsk = num(depth.a[0]?.[0]);
       const bestBid = num(depth.b[0]?.[0]);
-      const mid = bestAsk && bestBid ? (bestAsk + bestBid) / 2 : bestAsk || bestBid;
-      curEl.textContent = mid > 0 ? currency(mid * rate) : "—";
-      srcEl.textContent = latest ? "live worker" : "rest fallback";
+      const midUsdt = native?.value ?? (bestAsk && bestBid ? (bestAsk + bestBid) / 2 : bestAsk || bestBid);
+      const up = native ? native.up : midUsdt >= lastMid;
+      if (midUsdt > 0)
+        lastMid = midUsdt;
+      midEl.classList.toggle("up", up);
+      midEl.classList.toggle("down", !up);
+      curEl.textContent = midUsdt > 0 ? currency(midUsdt * rate) : "—";
+      approxEl.textContent = midUsdt > 0 ? `≈ ${plainUsdt(midUsdt)} USDT` : "";
     };
     const schedule = () => {
       if (scheduled || stopped)
@@ -1973,12 +2048,11 @@ coin:
       restDepth = null;
       schedule();
     };
-    const bybitSymbol = () => `${base}${quote}`;
     const loadRest = async () => {
       if (stopped || !base)
         return;
       try {
-        const body = await requestJson(`https://api.bybit.com/v5/market/orderbook?category=spot&symbol=${encodeURIComponent(bybitSymbol())}&limit=50`, 1e4);
+        const body = await requestJson(`https://api.bybit.com/v5/market/orderbook?category=spot&symbol=${encodeURIComponent(`${base}${quote}`)}&limit=50`, 1e4);
         const result = body?.result;
         if (!result || latest)
           return;
@@ -1992,26 +2066,87 @@ coin:
       loadRest();
       pollTimer = setInterval(() => void loadRest(), POLL_INTERVAL_MS);
     };
-    const anchor = () => {
-      if (stopped)
+    const gridItemOf = (selector) => {
+      const inner = document.querySelector(selector);
+      return inner?.closest(".react-grid-item") ?? inner;
+    };
+    const place = (left, top, width, height) => {
+      const maxLeft = Math.max(4, window.innerWidth - width - 4);
+      const maxTop = Math.max(4, window.innerHeight - 120);
+      const x = Math.min(Math.max(4, left), maxLeft);
+      const y = Math.min(Math.max(4, top), maxTop);
+      host.style.left = `${Math.round(x)}px`;
+      host.style.top = `${Math.round(y)}px`;
+      host.style.width = `${Math.round(width)}px`;
+      host.style.height = `${Math.round(Math.max(300, Math.min(height, window.innerHeight - y - 8)))}px`;
+      host.style.display = "";
+    };
+    const setChartWidth = (width) => {
+      const chart = gridItemOf("#sfeKlineArea");
+      if (!chart)
         return;
-      const area = document.querySelector("#orderBookArea") ?? document.querySelector(".order-book-area");
-      const rect = area?.getBoundingClientRect();
-      if (!rect || rect.width < 100 || rect.height < 80) {
-        panel.style.left = "auto";
-        panel.style.top = "auto";
-        panel.style.right = "14px";
-        panel.style.bottom = "14px";
-        panel.style.height = "420px";
+      const target = `${Math.round(Math.max(260, width))}px`;
+      if (chart.style.width !== target)
+        chart.style.width = target;
+    };
+    const dock = () => {
+      const chart = gridItemOf("#sfeKlineArea");
+      const book = gridItemOf("#orderBookArea");
+      if (!chart || !book)
+        return false;
+      const chartRect = chart.getBoundingClientRect();
+      const bookRect = book.getBoundingClientRect();
+      if (bookRect.width < 100 || bookRect.height < 100)
+        return false;
+      const left = bookRect.left - PANEL_WIDTH - GAP;
+      const chartWidth = left - chartRect.left - GAP;
+      if (chartWidth >= 300) {
+        setChartWidth(chartWidth);
+        place(left, bookRect.top, PANEL_WIDTH, bookRect.height);
+        return true;
+      }
+      setChartWidth(bookRect.left - chartRect.left - GAP);
+      if (bookRect.right + GAP + PANEL_WIDTH <= window.innerWidth - 4) {
+        place(bookRect.right + GAP, bookRect.top, PANEL_WIDTH, bookRect.height);
+        return true;
+      }
+      place(window.innerWidth - PANEL_WIDTH - 14, Math.max(8, window.innerHeight - 460), PANEL_WIDTH, 440);
+      return true;
+    };
+    const undockChart = () => {
+      const chart = gridItemOf("#sfeKlineArea");
+      const book = gridItemOf("#orderBookArea");
+      if (!chart || !book)
+        return;
+      const chartRect = chart.getBoundingClientRect();
+      const bookRect = book.getBoundingClientRect();
+      setChartWidth(bookRect.left - chartRect.left - GAP);
+    };
+    const updateRowCount = () => {
+      const collapsed = panel.dataset["collapsed"] === "true";
+      const height = host.getBoundingClientRect().height;
+      if (collapsed) {
+        perSide = 0;
         return;
       }
-      panel.style.right = "auto";
-      panel.style.bottom = "auto";
-      panel.style.top = `${Math.round(rect.top)}px`;
-      const height = Math.max(280, Math.min(rect.height, window.innerHeight - rect.top - 8));
-      panel.style.height = `${Math.round(height)}px`;
-      const left = rect.left - WIDTH - 6;
-      panel.style.left = `${Math.round(left >= 8 ? left : Math.max(8, rect.right + 6))}px`;
+      const available = height - HEADER_H - SUB_H - COLS_H - MID_H;
+      perSide = Math.max(5, Math.min(MAX_ROWS, Math.floor(available / 2 / MIN_ROW_H)));
+    };
+    const layout = () => {
+      if (stopped)
+        return;
+      const collapsed = panel.dataset["collapsed"] === "true";
+      if (manual) {
+        undockChart();
+        place(manual.left, manual.top, PANEL_WIDTH, host.getBoundingClientRect().height || 668);
+      } else if (!dock()) {
+        host.style.display = "none";
+        return;
+      }
+      if (collapsed)
+        host.style.height = `${HEADER_H}px`;
+      updateRowCount();
+      render();
     };
     const syncPair = () => {
       const pair = currentPair();
@@ -2019,17 +2154,34 @@ coin:
         host.style.display = "none";
         return;
       }
-      host.style.display = "";
       if (pair.base === base && pair.quote === quote)
         return;
       base = pair.base;
       quote = pair.quote;
       latest = null;
       restDepth = null;
+      lastMid = 0;
       schedule();
       if (fallbackTimer)
         clearTimeout(fallbackTimer);
       fallbackTimer = setTimeout(startFallback, POLL_FALLBACK_MS);
+    };
+    const saveManual = () => {
+      const rect = host.getBoundingClientRect();
+      manual = { left: Math.round(rect.left), top: Math.round(rect.top) };
+      setStored(POS_KEY, manual);
+    };
+    const setCollapsed = (collapsed) => {
+      panel.dataset["collapsed"] = String(collapsed);
+      $('[data-act="collapse"]').textContent = collapsed ? "+" : "−";
+      setStored(COLLAPSE_KEY, collapsed);
+      if (collapsed) {
+        host.style.height = `${HEADER_H}px`;
+      } else {
+        layout();
+      }
+      updateRowCount();
+      render();
     };
     panel.addEventListener("click", (event) => {
       const target = event.target.closest("[data-act]");
@@ -2040,12 +2192,45 @@ coin:
         loadRest();
         schedule();
       }
-      if (action === "collapse") {
-        const collapsed = panel.dataset["collapsed"] !== "true";
-        panel.dataset["collapsed"] = String(collapsed);
-        target.textContent = collapsed ? "+" : "−";
-        setStored(COLLAPSE_KEY, collapsed);
+      if (action === "dock") {
+        manual = null;
+        setStored(POS_KEY, null);
+        layout();
       }
+      if (action === "collapse") {
+        setCollapsed(panel.dataset["collapsed"] !== "true");
+      }
+    });
+    const head = $(".head");
+    let drag = null;
+    head.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("[data-act]"))
+        return;
+      const rect = host.getBoundingClientRect();
+      drag = { startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top };
+      try {
+        head.setPointerCapture(event.pointerId);
+      } catch {}
+      event.preventDefault();
+    });
+    head.addEventListener("pointermove", (event) => {
+      if (!drag)
+        return;
+      const left = Math.max(4, Math.min(window.innerWidth - 120, drag.left + event.clientX - drag.startX));
+      const top = Math.max(4, Math.min(window.innerHeight - 60, drag.top + event.clientY - drag.startY));
+      host.style.left = `${Math.round(left)}px`;
+      host.style.top = `${Math.round(top)}px`;
+      host.style.display = "";
+    });
+    head.addEventListener("pointerup", (event) => {
+      if (!drag)
+        return;
+      drag = null;
+      try {
+        head.releasePointerCapture(event.pointerId);
+      } catch {}
+      saveManual();
+      undockChart();
     });
     const mount = () => {
       if (!document.body) {
@@ -2058,10 +2243,11 @@ coin:
         $('[data-act="collapse"]').textContent = "+";
       }
       syncPair();
-      anchor();
+      layout();
       listeners2.add(onDepth);
-      window.addEventListener("resize", anchor, { passive: true });
-      anchorTimer = setInterval(anchor, 800);
+      window.addEventListener("resize", layout, { passive: true });
+      window.addEventListener("scroll", layout, { passive: true, capture: true });
+      layoutTimer = setInterval(layout, 800);
       if (fallbackTimer)
         clearTimeout(fallbackTimer);
       fallbackTimer = setTimeout(startFallback, POLL_FALLBACK_MS);
@@ -2071,32 +2257,33 @@ coin:
     return {
       refresh: () => {
         syncPair();
-        anchor();
+        layout();
         schedule();
       },
       destroy: () => {
         stopped = true;
         listeners2.delete(onDepth);
-        window.removeEventListener("resize", anchor);
+        window.removeEventListener("resize", layout);
+        window.removeEventListener("scroll", layout, { capture: true });
         if (pollTimer)
           clearInterval(pollTimer);
         if (fallbackTimer)
           clearTimeout(fallbackTimer);
-        if (anchorTimer)
-          clearInterval(anchorTimer);
+        if (layoutTimer)
+          clearInterval(layoutTimer);
         host.remove();
       },
       describe: () => {
         const depth = latest ?? restDepth;
-        const rows = depth ? Math.min(depth.a.length, ROWS) + Math.min(depth.b.length, ROWS) : 0;
-        const sample = sellRows[ROWS - 1]?.el.textContent?.trim().replace(/\s+/g, " ") ?? "";
+        const rows = depth ? Math.min(depth.a.length, perSide) + Math.min(depth.b.length, perSide) : 0;
+        const sample = sellRows[Math.max(0, perSide - 1)]?.el.textContent?.trim().replace(/\s+/g, " ") ?? "";
         return { adapter: "bybit:converted-book", rows, sample: sample ? [sample] : [] };
       }
     };
   }
 
   // src/lib/simple.ts
-  var POS_KEY = "ui.simple.pos";
+  var POS_KEY2 = "ui.simple.pos";
   var COLLAPSE_KEY2 = "ui.simple.collapsed";
   var FEE_TTL = 10 * 60 * 1000;
   var TICKER_MS = 15000;
@@ -2217,7 +2404,7 @@ coin:
     let stopped = false;
     let timer = null;
     const applyPosition = () => {
-      const saved = getStored(POS_KEY, null);
+      const saved = getStored(POS_KEY2, null);
       panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
       if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
         panel.style.left = `${saved.left}px`;
@@ -2357,7 +2544,7 @@ coin:
       if (!drag)
         return;
       const rect = panel.getBoundingClientRect();
-      setStored(POS_KEY, { left: Math.round(rect.left), top: Math.round(rect.top) });
+      setStored(POS_KEY2, { left: Math.round(rect.left), top: Math.round(rect.top) });
       drag = null;
       try {
         head.releasePointerCapture(event.pointerId);
@@ -2896,7 +3083,7 @@ coin:
   }
 
   // src/lib/panel.ts
-  var POS_KEY2 = "ui.panel.pos";
+  var POS_KEY3 = "ui.panel.pos";
   var COLLAPSE_KEY3 = "ui.panel.collapsed";
   var CSS3 = `
 :host { all: initial; }
@@ -3044,7 +3231,7 @@ coin:
     let info = null;
     let loading = false;
     const applyPosition = () => {
-      const saved = getStored(POS_KEY2, null);
+      const saved = getStored(POS_KEY3, null);
       panel.classList.remove("pos-bottom-left", "pos-bottom-right", "pos-top-left", "pos-top-right");
       if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
         panel.style.left = `${saved.left}px`;
@@ -3238,7 +3425,7 @@ coin:
       if (!drag)
         return;
       const rect = panel.getBoundingClientRect();
-      setStored(POS_KEY2, { left: Math.round(rect.left), top: Math.round(rect.top) });
+      setStored(POS_KEY3, { left: Math.round(rect.left), top: Math.round(rect.top) });
       drag = null;
       try {
         head.releasePointerCapture(event.pointerId);

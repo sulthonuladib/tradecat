@@ -3,6 +3,23 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.4.3
+
+- **Bybit panel now mirrors the native orderbook.** 316px wide, tab header with
+  the orange underline, 24px rows, red ask / green bid prices, white qty/total,
+  depth bars at the native opacity, column header with a sort arrow, and a
+  mid-price row with Bybit's own direction arrow and `≈ ... USDT` text.
+- **Docked between the chart and the native orderbook.** The chart is narrowed
+  to make room, so nothing overlaps; at narrow widths it falls back to the
+  right of the book or a bottom-right float.
+- **Draggable and dockable.** Drag the header to move it (position stored in
+  `ui.bybit.pos`); the dock button restores the three-column layout. Row count
+  follows the panel height (5–24 per side, 10 by default).
+- Worker interception is unchanged: the `spot.ob_` frames from Bybit's own
+  worker drive the panel, with the REST orderbook only as a fallback.
+- `bun run live` counts only visible rows in the converted panel.
+- Tests: 65 unit + 77 DOM.
+
 ## 0.4.2
 
 - **Cumulative orderbook mode.** Adapters can mark rows with

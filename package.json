@@ -1,6 +1,6 @@
 {
   "name": "tradecat-idr",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "description": "ScriptCat userscripts: IDR orderbook conversion + deposit/withdraw status for gate.com and mexc.fm",
   "author": "sulthonuladib",

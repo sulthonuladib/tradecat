@@ -51,7 +51,9 @@ const REPORT = `(() => {
   const describe = globalThis.TradeCat ? TradeCat.describe() : null;
   const parse = (s) => Number(String(s).replace(/[^\\d.]/g, ''));
   const bookHost = document.querySelector('#tradecat-book-host');
-  const apiRows = bookHost && bookHost.shadowRoot ? bookHost.shadowRoot.querySelectorAll('.row').length : 0;
+  const apiRows = bookHost && bookHost.shadowRoot
+    ? [...bookHost.shadowRoot.querySelectorAll('.row')].filter((row) => row.style.display !== 'none' && row.getBoundingClientRect().height > 0).length
+    : 0;
   const rows = apiRows ? [] : [...document.querySelectorAll('[class*="depth-list-item"], [class*="orderbookItem"], [class*="orderbook"] [class*="row-content"], [class*="ReactVirtualized__Grid__innerScrollContainer"] > div')];
   const badges = [...document.querySelectorAll('.tc-idr-price')].filter((b) => b.isConnected);
   const volumes = [...document.querySelectorAll('.tc-idr-volume')].filter((b) => b.isConnected && b.getBoundingClientRect().width > 0);

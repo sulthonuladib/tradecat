@@ -25,7 +25,9 @@ the shared USDT → IDR rate fresh.
 - **Deposit / withdraw panel** for the current coin: chain status (`D✓ W✓`),
   min/max, withdrawal fee in coin **and rupiah**, plus Deposit/Withdraw buttons.
 - **Bybit's canvas book** gets a converted IDR orderbook fed by Bybit's own
-  depth worker, anchored left of the native book.
+  depth worker and styled like the native panel. It docks between the chart and
+  the orderbook (the chart makes room), drags like a normal panel, and snaps
+  back with its dock button.
 - **Indodax**, already priced in rupiah, gets a compact last price, **1% margin**
   and withdrawal-fee card.
 - **One rate, two scripts.** The updater refreshes USDT/IDR every 15 minutes;
@@ -362,10 +364,14 @@ file).
 - Bybit draws its spot orderbook on a `<canvas>`, so there are no cells to
   overlay. `lib/bybit.ts` wraps `Worker.prototype.onmessage` at document-start
   to capture Bybit's own `spot.ob_` frames (same trick as the reference
-  `Bybit Price Interceptor`), renders 8 rows per side as Price/Qty/Total in IDR
-  with depth bars, and anchors the panel just left of the native orderbook.
-  If no worker frame arrives, it falls back to the public `/v5/market/orderbook`
-  every 3 s.
+  `Bybit Price Interceptor`) and renders a twin of the native panel: same 316px
+  width, tab header with the orange underline, 24px rows, red ask / green bid
+  prices, white qty/total, matching depth bars, and a mid-price row with the
+  native direction arrow. It docks between the chart and the orderbook by
+  narrowing the chart, can be dragged anywhere (position is remembered), and
+  the dock button snaps it back. Rows are dynamic (5–24 per side, 10 at the
+  default height). If no worker frame arrives, it falls back to the public
+  `/v5/market/orderbook` every 3 s.
 - Indodax's finance page needs a login; logged out, the panel says so and only
   the price/1% margin are shown.
 - MEXC's asset endpoints are behind bot protection from some networks; when they
