@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.4.3
+// @version      0.4.4
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com, mexc.fm, binance.com, kucoin.com and bybit.com; Indodax gets a compact fee + 1% margin readout.
 // @author       sulthonuladib
 // @license      MIT
@@ -2292,8 +2292,8 @@ coin:
 .panel {
   position: fixed;
   z-index: 2147482999;
-  min-width: 216px;
-  max-width: 280px;
+  min-width: 232px;
+  max-width: 320px;
   font: 12px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: #e6edf3;
   background: rgba(13, 17, 23, 0.94);
@@ -2316,13 +2316,15 @@ coin:
 .icon:hover { color: #e6edf3; background: rgba(255, 255, 255, 0.08); }
 .body { padding: 8px; display: flex; flex-direction: column; gap: 5px; }
 .panel[data-collapsed="true"] .body { display: none; }
-.line { display: flex; align-items: baseline; gap: 8px; }
+.line { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 8px; }
 .line .k { color: #8b949e; font-size: 11px; white-space: nowrap; }
-.line .v { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.line .v {
+  text-align: right; font-weight: 600; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere; white-space: normal;
+}
 .line .v.price { color: #e6edf3; }
-.line .v.margin { color: #ead05a; }
-.line .v.fee { color: #ead05a; }
-.line .net { color: #c9d1d9; font-weight: 600; }
+.line .v.margin, .line .v.fee { color: #ead05a; }
+.line .v.net { color: #c9d1d9; font-weight: 600; }
 .hint { color: #d29922; font-size: 10px; line-height: 1.35; }
 .hint:empty { display: none; }
 .foot { display: flex; gap: 6px; align-items: center; font-size: 10px; color: #6e7681; }
@@ -2383,7 +2385,8 @@ coin:
     <div class="body">
       <div class="line"><span class="k">Harga</span><span class="v price">—</span></div>
       <div class="line"><span class="k">Selisih 1%</span><span class="v margin">—</span></div>
-      <div class="line"><span class="k">Fee <span class="net"></span></span><span class="v fee">—</span></div>
+      <div class="line"><span class="k">Network</span><span class="v net">—</span></div>
+      <div class="line"><span class="k">Fee =</span><span class="v fee">—</span></div>
       <div class="hint"></div>
     </div>
     <div class="foot"><span class="status"></span><button class="retry" data-act="refresh">retry</button></div>`;
@@ -2394,7 +2397,7 @@ coin:
     const priceEl = $(".v.price");
     const marginEl = $(".v.margin");
     const feeEl = $(".v.fee");
-    const netEl = $(".net");
+    const netEl = $(".v.net");
     const hintEl = $(".hint");
     const statusEl = $(".status");
     let base = "";
@@ -2439,18 +2442,21 @@ coin:
       marginEl.textContent = margin > 0 ? formatIdr(margin * 0.01, { prefix: "Rp. " }) : "—";
       const coinPrice = toIdr(ticker.last);
       if (feeInfo?.fee != null) {
-        netEl.textContent = feeInfo.network ? `(${feeInfo.network})` : "";
+        netEl.textContent = feeInfo.network ?? "—";
+        netEl.title = feeInfo.network ?? "";
         const rupiah = coinPrice > 0 ? feeInfo.fee * coinPrice : 0;
         const coinText = `${feeInfo.fee.toLocaleString("id-ID", { maximumFractionDigits: 8 })} ${base}`;
-        feeEl.textContent = rupiah > 0 ? `${coinText} ≈ ${formatIdr(rupiah, { prefix: "Rp. " })}` : coinText;
-        feeEl.title = rupiah > 0 ? `${coinText} × ${formatIdr(coinPrice, { prefix: "Rp. " })}` : coinText;
+        feeEl.textContent = rupiah > 0 ? formatIdr(rupiah, { prefix: "Rp. " }) : "—";
+        feeEl.title = rupiah > 0 ? `${coinText} × ${formatIdr(coinPrice, { prefix: "Rp. " })} = ${formatIdr(rupiah, { prefix: "Rp. " })}` : coinText;
         hintEl.textContent = "";
       } else if (feeInfo?.needsLogin) {
-        netEl.textContent = "";
+        netEl.textContent = "—";
+        netEl.title = "";
         feeEl.textContent = "—";
         hintEl.textContent = "Login untuk memuat fee penarikan (halaman finance).";
       } else {
-        netEl.textContent = "";
+        netEl.textContent = "—";
+        netEl.title = "";
         feeEl.textContent = "—";
         hintEl.textContent = feeInfo ? "Fee tidak tersedia untuk koin ini." : "Memuat fee…";
       }

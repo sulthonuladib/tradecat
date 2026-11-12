@@ -269,7 +269,7 @@ async function openPage(url, flags) {
 
   if (flags.panelShot) {
     const rect = await evaluate(`(() => {
-      const host = document.querySelector('#tradecat-panel-host');
+      const host = document.querySelector('#tradecat-panel-host, #tradecat-simple-host, #tradecat-book-host');
       const panel = host && host.shadowRoot && host.shadowRoot.querySelector('.panel');
       if (!panel) return null;
       const r = panel.getBoundingClientRect();

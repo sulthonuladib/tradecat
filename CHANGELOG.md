@@ -3,6 +3,17 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.4.4
+
+- **Indodax fee card is readable again.** The network name and the fee shared
+  one line, so a long network (e.g. `SOL Token Standart (SPL)`) pushed the
+  rupiah value out of the panel. They are now separate rows:
+  `Harga`, `Selisih 1%`, `Network`, `Fee =` (rupiah only; the coin amount stays
+  in the tooltip), with values allowed to wrap instead of clipping.
+- Panel min/max width widened slightly (232–320px) for long network names.
+- `bun run live --panel-shot` also captures the Indodax and Bybit panels.
+- Tests: 65 unit + 77 DOM.
+
 ## 0.4.3
 
 - **Bybit panel now mirrors the native orderbook.** 316px wide, tab header with

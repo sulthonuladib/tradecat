@@ -28,8 +28,8 @@ the shared USDT → IDR rate fresh.
   depth worker and styled like the native panel. It docks between the chart and
   the orderbook (the chart makes room), drags like a normal panel, and snaps
   back with its dock button.
-- **Indodax**, already priced in rupiah, gets a compact last price, **1% margin**
-  and withdrawal-fee card.
+- **Indodax**, already priced in rupiah, gets a compact card with the last
+  price, **1% margin**, network and withdrawal fee — each on its own row.
 - **One rate, two scripts.** The updater refreshes USDT/IDR every 15 minutes;
   the orderbook reads it from shared storage, no reload needed.
 
