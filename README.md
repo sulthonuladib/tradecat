@@ -1,27 +1,40 @@
-# TradeCat · IDR Orderbook (gate, MEXC, Binance, KuCoin, Bybit)
+# TradeCat · IDR Orderbook
 
-ScriptCat userscripts that make USDT orderbooks readable in rupiah. Indodax
-gets a compact fee + 1% margin readout instead, since its prices are already in
-rupiah.
+**See every crypto orderbook in rupiah.** TradeCat adds the IDR price beside each
+price, turns the Total column into IDR volume, and shows each coin's deposit and
+withdraw networks, limits and fees in a small panel.
 
-**Install: [INSTALL.md](INSTALL.md)**
+Two ScriptCat userscripts: the orderbook script and a rate updater that keeps
+the shared USDT → IDR rate fresh.
 
-| Feature | Where |
-| --- | --- |
-| IDR price appended to the right of every orderbook price | orderbook, both sides |
-| `Total (USDT)` replaced with the **IDR volume** | orderbook |
-| Deposit / withdraw enabled state, per chain, with chain list | floating panel |
-| Withdrawal **fee in coin + rupiah**, min/max withdraw | floating panel |
-| Quick **Deposit** / **Withdraw** buttons for the current coin | floating panel |
-| USDT → IDR rate read from shared storage (a separate script can keep it fresh) | storage |
-| **Withdrawal fee + 1% margin** in rupiah (Indodax) | compact panel |
-| Converted IDR orderbook fed by Bybit's own depth worker (canvas workaround) | panel left of the native book |
+**Works on:** [gate.com](https://www.gate.com/trade/BTC_USDT) ·
+[MEXC](https://www.mexc.fm/exchange/BTC_USDT) ·
+[Binance](https://www.binance.com/en/trade/BTC_USDT) ·
+[KuCoin](https://www.kucoin.com/trade/BTC-USDT) ·
+[Bybit](https://www.bybit.com/en/trade/spot/BTC/USDT) ·
+[Indodax](https://indodax.com/market/BTCIDR)
 
-Tested layouts: gate.com (divs, `266.38K` totals, depth bars), mexc.fm (table,
-`3,893.29` totals), binance.com (`.orderbook-progress` rows), kucoin.com
-(virtualised rows, cumulative Total column), bybit.com (canvas, replaced by a
-converted panel fed by the page's own worker) and indodax.com. Nothing in the engine depends on class names, see
-[How the orderbook detection works](#how-the-orderbook-detection-works).
+**Install:** [INSTALL.md](INSTALL.md) · two scripts, about a minute.
+
+## What you get
+
+- **IDR prices** beside the orderbook price on both sides, with full or compact
+  formatting so the number fits inside the row.
+- **IDR totals.** The Total column is replaced with the rupiah value; Binance's
+  Amount/Cumulative setting is followed too.
+- **Deposit / withdraw panel** for the current coin: chain status (`D✓ W✓`),
+  min/max, withdrawal fee in coin **and rupiah**, plus Deposit/Withdraw buttons.
+- **Bybit's canvas book** gets a converted IDR orderbook fed by Bybit's own
+  depth worker, anchored left of the native book.
+- **Indodax**, already priced in rupiah, gets a compact last price, **1% margin**
+  and withdrawal-fee card.
+- **One rate, two scripts.** The updater refreshes USDT/IDR every 15 minutes;
+  the orderbook reads it from shared storage, no reload needed.
+
+Tested against live layouts of all six exchanges. Nothing depends on hashed
+class names: the engine finds the rows and re-checks `price × amount ≈ total`
+(or maps columns positionally where an exchange wants that), so a redesign is a
+rescan, not a rewrite. See [How the orderbook detection works](#how-the-orderbook-detection-works).
 
 ---
 
