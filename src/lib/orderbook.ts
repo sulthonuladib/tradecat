@@ -465,6 +465,35 @@ interface VolumeWrite {
   color: string;
 }
 
+/**
+ * Turn per-row totals into cumulative depth totals.
+ *
+ * Adapters mark rows with `cumulative = { group, index }` when the exchange is
+ * in a cumulative display mode (0 = best price). The values are summed in that
+ * order, so the best row shows one level and the farthest row shows the whole
+ * side.
+ */
+function applyCumulativeTotals(rows: OrderRow[]): void {
+  const groups = new Map<string, OrderRow[]>();
+  for (const row of rows) {
+    if (!row.cumulative) continue;
+    const list = groups.get(row.cumulative.group) ?? [];
+    list.push(row);
+    groups.set(row.cumulative.group, list);
+  }
+
+  for (const list of groups.values()) {
+    list.sort((a, b) => (a.cumulative?.index ?? 0) - (b.cumulative?.index ?? 0));
+    let sum = 0;
+    for (const row of list) {
+      const own = row.totalValue ?? parseNumber(siteText(row.total.el));
+      if (own == null || own <= 0) continue;
+      sum += own;
+      row.totalValue = sum;
+    }
+  }
+}
+
 function planRows(
   rows: OrderRow[],
   rate: number,
@@ -758,6 +787,8 @@ export function startOrderbook(options: {
       if (fresh) current.push(fresh);
     }
     if (current.length === 0) return;
+
+    applyCumulativeTotals(current);
 
     const config = options.getConfig();
     const plan = planRows(current, options.getRate(), config);

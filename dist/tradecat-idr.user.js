@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.4.1
+// @version      0.4.2
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com, mexc.fm, binance.com, kucoin.com and bybit.com; Indodax gets a compact fee + 1% margin readout.
 // @author       sulthonuladib
 // @license      MIT
@@ -695,6 +695,8 @@ coin:
       });
       if (row.deriveTotal)
         fresh.totalValue = price.value * amount.value;
+      if (row.cumulative)
+        fresh.cumulative = row.cumulative;
       return fresh;
     }
     return rowTriple(row.row);
@@ -948,11 +950,52 @@ coin:
     '[class*="orderbook-list" i]',
     '[class*="orderbook" i]'
   ];
+  var VISUAL_KEY = "trd-orderbook-visual";
+  function cumulativeMode() {
+    try {
+      const raw = localStorage.getItem(VISUAL_KEY);
+      if (!raw)
+        return false;
+      return JSON.parse(raw) === "cumulative";
+    } catch {
+      return false;
+    }
+  }
+  function markCumulative(rows) {
+    if (!rows.length || !cumulativeMode())
+      return;
+    const sides = new Map;
+    for (const row of rows) {
+      let side = "";
+      try {
+        const holder = row.row.closest('[class*="orderbook-ask" i], [class*="orderbook-bid" i]');
+        const cls = holder?.className ?? "";
+        if (/ask/i.test(cls))
+          side = "ask";
+        else if (/bid/i.test(cls))
+          side = "bid";
+      } catch {}
+      if (!side)
+        continue;
+      const list = sides.get(side) ?? [];
+      list.push(row);
+      sides.set(side, list);
+    }
+    for (const [side, list] of sides) {
+      const count = list.length;
+      list.forEach((row, index) => {
+        row.cumulative = { group: side, index: side === "ask" ? count - 1 - index : index };
+      });
+    }
+  }
   var binanceAdapter = {
     id: "binance",
     cacheMs: 300,
     locate(doc) {
-      return locateRows(doc, { rows: ROW_SELECTORS, scopes: SCOPE_SELECTORS });
+      const rows = locateRows(doc, { rows: ROW_SELECTORS, scopes: SCOPE_SELECTORS });
+      if (rows)
+        markCumulative(rows);
+      return rows;
     }
   };
 
@@ -1402,6 +1445,27 @@ coin:
     }
     return row.parentElement ?? document.body;
   }
+  function applyCumulativeTotals(rows) {
+    const groups = new Map;
+    for (const row of rows) {
+      if (!row.cumulative)
+        continue;
+      const list = groups.get(row.cumulative.group) ?? [];
+      list.push(row);
+      groups.set(row.cumulative.group, list);
+    }
+    for (const list of groups.values()) {
+      list.sort((a, b) => (a.cumulative?.index ?? 0) - (b.cumulative?.index ?? 0));
+      let sum = 0;
+      for (const row of list) {
+        const own = row.totalValue ?? parseNumber(siteText(row.total.el));
+        if (own == null || own <= 0)
+          continue;
+        sum += own;
+        row.totalValue = sum;
+      }
+    }
+  }
   function planRows(rows, rate, config) {
     const prices = [];
     const volumes = [];
@@ -1600,6 +1664,7 @@ coin:
       }
       if (current.length === 0)
         return;
+      applyCumulativeTotals(current);
       const config = options.getConfig();
       const plan = planRows(current, options.getRate(), config);
       applyOverlays(plan.prices, plan.volumes, config);

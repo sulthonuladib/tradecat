@@ -21,7 +21,7 @@ const DEFAULT_BUNDLE = join(import.meta.dir, '..', 'dist', 'tradecat-idr.user.js
 /** @param {string[]} argv */
 function parseArgs(argv) {
   const urls = [];
-  const flags = { bundle: DEFAULT_BUNDLE, shot: null, panelShot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150, evalFile: null, width: 1440, height: 1000, start: false };
+  const flags = { bundle: DEFAULT_BUNDLE, shot: null, panelShot: null, wait: 18000, settle: 6000, json: false, samples: 1, interval: 150, evalFile: null, initFile: null, width: 1440, height: 1000, start: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
@@ -34,6 +34,7 @@ function parseArgs(argv) {
     else if (arg === '--samples') flags.samples = Math.max(1, Number(argv[++i]));
     else if (arg === '--interval') flags.interval = Math.max(50, Number(argv[++i]));
     else if (arg === '--eval-file') flags.evalFile = argv[++i];
+    else if (arg === '--init-file') flags.initFile = argv[++i];
     else if (arg === '--width') flags.width = Number(argv[++i]);
     else if (arg === '--height') flags.height = Number(argv[++i]);
     else if (arg.startsWith('-')) throw new Error(`unknown flag ${arg}`);
@@ -222,6 +223,10 @@ async function openPage(url, flags) {
   await send('Emulation.setDeviceMetricsOverride', { width: flags.width, height: flags.height, deviceScaleFactor: 1, mobile: false });
 
   const bundle = readFileSync(flags.bundle, 'utf8');
+  if (flags.initFile) {
+    // Runs before page scripts, e.g. to seed localStorage for a test.
+    await send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(flags.initFile, 'utf8') });
+  }
   if (flags.start) {
     // Inject before any page script runs, like @run-at document-start.
     await send('Page.addScriptToEvaluateOnNewDocument', { source: `${bundle}\n;1` });

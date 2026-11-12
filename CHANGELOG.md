@@ -3,6 +3,22 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.4.2
+
+- **Cumulative orderbook mode.** Adapters can mark rows with
+  `cumulative = { group, index }` (index 0 = best price); the engine sums the
+  per-row totals in that order when the exchange is in a cumulative depth mode.
+- **Binance follows its own setting.** `Order Book Display → Book Depth
+  Visualization` writes `trd-orderbook-visual = "amount" | "cumulative"` to
+  localStorage. The adapter reads it on every rescan: in Amount mode Total is
+  the row's own IDR value, in Cumulative mode the totals are summed from the
+  best price outward. No reload needed.
+- Binance rows are now mapped by column position (`.row-content`), so the
+  product check is not required and both modes convert reliably.
+- `bun run live --init-file <js>` seeds localStorage before page scripts, used
+  to verify the cumulative mode.
+- Tests: 65 unit + 77 DOM.
+
 ## 0.4.1
 
 - **Binance overlay no longer hides price and amount.** Binance wraps each row

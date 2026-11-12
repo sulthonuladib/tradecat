@@ -44,6 +44,12 @@ export interface OrderRow {
   totalValue?: number;
   /** Recompute `totalValue` from price × amount on every refresh. */
   deriveTotal?: boolean;
+  /**
+   * When the exchange groups rows into a cumulative depth mode, this says which
+   * side and which depth step (0 = best price). The engine sums the totals of
+   * the group in that order instead of showing each row's own total.
+   */
+  cumulative?: { group: string; index: number };
 }
 
 interface Triple {
@@ -161,6 +167,7 @@ export function refreshRow(row: OrderRow): OrderRow | null {
       span: totalIndex - priceIndex,
     });
     if (row.deriveTotal) fresh.totalValue = price.value * amount.value;
+    if (row.cumulative) fresh.cumulative = row.cumulative;
     return fresh;
   }
   return rowTriple(row.row);

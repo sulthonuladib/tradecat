@@ -162,7 +162,7 @@ re-renders are handled once by the engine (`src/lib/orderbook.ts`):
 | --- | --- |
 | gate | gate hints first (`#market-list…`, `*entrust*`, `*trade-grid*`, `*orderbook*`), then structure |
 | mexc | `*orderbookItem*` rows, then `*asks*` / `*bids*` boxes, then structure |
-| binance | `*orderbook-progress*` rows, then `*orderbook*` containers, then structure |
+| binance | `.row-content` rows (mapped by column so the product test is not required), then structure; follows `trd-orderbook-visual` (Amount/Cumulative) |
 | kucoin | virtualised grid rows, mapped by column position (its Total column is cumulative, so the product check does not apply) |
 | bybit | no DOM rows (canvas): `Worker.prototype.onmessage` is wrapped at document-start, the `spot.ob_` depth frames drive `lib/bybit.ts`, and the panel is anchored left of the native book |
 | generic | structure only |
@@ -175,6 +175,14 @@ The structural rule needs no class names:
    (tolerance = 2%, or the display rounding step),
 3. at least two children of the parent agree on the same column layout, and at
    least 60% of the parent's children are row-like.
+
+When an exchange offers a cumulative depth mode, the adapter marks each row with
+`cumulative = { group, index }` (index 0 = best price). The engine then sums the
+per-row totals along that group instead of showing each row's own total.
+Binance's switch (`Order Book Display → Book Depth Visualization`) stores
+`trd-orderbook-visual = "amount" | "cumulative"` in localStorage and the
+Binance adapter reads it on every rescan, so toggling the exchange setting
+updates the IDR totals without a reload.
 
 The product check keeps the open-orders table, trade history and the buy/sell
 ratio bar out. Row-density and row-containment checks stop a two-row side panel
@@ -333,9 +341,11 @@ file).
 
 - Only USDT-quoted pairs are converted (the header must read `Price (USDT)`);
   Indodax pairs are quoted in rupiah and only get the fee/margin panel.
-- Rows must satisfy `price * amount ≈ total`. KuCoin's Total column is a
-  cumulative amount, so its adapter maps columns positionally and derives the
-  row value from `price × amount` instead.
+- Rows must satisfy `price * amount ≈ total`, except where an adapter maps
+  columns positionally. KuCoin's Total column is a cumulative amount, so its
+  adapter derives the row value from `price × amount`; Binance is mapped by
+  position too, because its Cumulative display mode changes the depth bars (and
+  the expected IDR totals) without changing the Total cells.
 - Bybit draws its spot orderbook on a `<canvas>`, so there are no cells to
   overlay. `lib/bybit.ts` wraps `Worker.prototype.onmessage` at document-start
   to capture Bybit's own `spot.ob_` frames (same trick as the reference
