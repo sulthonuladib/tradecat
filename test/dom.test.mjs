@@ -42,6 +42,8 @@ const server = Bun.serve({
   },
 });
 
+const BROWSER = process.env.CHROME || process.env.CHROMIUM || 'chromium';
+
 function dumpDom(pathAndQuery) {
   const url = `http://127.0.0.1:${server.port}${pathAndQuery}`;
   const profile = mkdtempSync(join(tmpdir(), 'tc-profile-'));
@@ -60,7 +62,7 @@ function dumpDom(pathAndQuery) {
   ];
 
   return new Promise((resolve, reject) => {
-    const child = spawn('chromium', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn(BROWSER, args, { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     child.stdout.on('data', (chunk) => {
       out += chunk;

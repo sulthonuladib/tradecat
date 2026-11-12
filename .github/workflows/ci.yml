@@ -18,7 +18,14 @@ jobs:
         run: bun test test/format.test.ts test/coininfo.test.ts test/site.test.ts
       - name: Typecheck
         run: bunx tsc --noEmit
-      - name: Install chromium (for DOM tests)
-        run: sudo apt-get update && sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+      # ubuntu-latest routes `chromium-browser` to a snap that cannot reach the
+      # store on CI runners, so install Chrome for Testing directly instead.
+      - name: Install Chrome (for DOM tests)
+        uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+        with:
+          chrome-version: stable
       - name: DOM tests
         run: bun run test/dom.test.mjs
+        env:
+          CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
