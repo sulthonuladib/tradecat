@@ -78,7 +78,8 @@ export function depositUrl(site: SiteId, coin: string): string {
   if (site === 'gate') return `${base}/myaccount/deposit/${coin}`;
   if (site === 'mexc') return `${base}/assets/deposit/${coin}`;
   if (site === 'binance') return `${base}/my/wallet/deposit`;
-  if (site === 'kucoin') return `${base}/assets/deposit`;
+  // KuCoin's deposit page is /assets/coin; /assets/deposit renders Not Found.
+  if (site === 'kucoin') return `${base}/assets/coin`;
   if (site === 'bybit') return `${base}/en/assets/deposit`;
   return '';
 }

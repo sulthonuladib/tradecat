@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { currentPair, detectSite, isSimpleSite, usesApiBook } from '../src/lib/site';
+import { currentPair, depositUrl, detectSite, isSimpleSite, usesApiBook } from '../src/lib/site';
 
 describe('detectSite', () => {
   test('recognises every supported host, including subdomains', () => {
@@ -19,6 +19,24 @@ describe('detectSite', () => {
     expect(isSimpleSite('kucoin')).toBe(false);
     expect(usesApiBook('bybit')).toBe(true);
     expect(usesApiBook('binance')).toBe(false);
+  });
+});
+
+describe('depositUrl', () => {
+  test('uses KuCoin’s supported deposit route, not the missing /assets/deposit page', () => {
+    const location = new URL('https://www.kucoin.com/trade/BTC-USDT');
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'location');
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: location });
+    try {
+      // KuCoin’s Deposit FAQ links to /assets/coin:
+      // https://www.kucoin.com/support/900002595503
+      expect(depositUrl('kucoin', 'BTC')).toBe('https://www.kucoin.com/assets/coin');
+      location.pathname = '/id/trade/ETH-USDT';
+      expect(depositUrl('kucoin', 'ETH')).toBe('https://www.kucoin.com/assets/coin');
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'location', original);
+      else Reflect.deleteProperty(globalThis, 'location');
+    }
   });
 });
 

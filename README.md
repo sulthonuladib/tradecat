@@ -380,4 +380,5 @@ file).
 - Deposit / withdraw URLs use the current origin (Binance/KuCoin/Bybit land on
   their generic wallet pages, since the coin is chosen inside the app):
   gate `/myaccount/{deposit,withdraw}/<COIN>`,
-  mexc `/assets/{deposit,withdraw}/<COIN>`.
+  mexc `/assets/{deposit,withdraw}/<COIN>`,
+  KuCoin `/assets/coin` (deposit) and `/assets/withdraw` (withdraw).

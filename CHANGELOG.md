@@ -3,6 +3,13 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.4.5
+
+- **KuCoin Deposit button no longer opens Page Not Found.** Use `/assets/coin`,
+  the deposit route linked by KuCoin's own Deposit FAQ, instead of the invalid
+  `/assets/deposit`. Added a regression test for regular and localized trade
+  pages and rebuilt the userscripts with a version bump for ScriptCat updates.
+
 ## 0.4.4
 
 - **Indodax fee card is readable again.** The network name and the fee shared
