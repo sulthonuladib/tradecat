@@ -3,6 +3,17 @@
 Versions are the `@version` in the userscript metadata blocks. ScriptCat only
 offers an update when this number changes, so every released change bumps it.
 
+## 0.4.6
+
+- **Indodax withdrawal fees no longer inflate 1,000×.** Finance-page amounts
+  such as `1,105` and `164,534` use a decimal comma, but the generic exchange
+  parser treated them as thousands. Normalize this localized field before
+  multiplying by the token's last price; the price source is unchanged.
+- Discard pre-fix fee caches so an update immediately fetches corrected amounts.
+- Added browser regressions for SKYAI/BEP20 and STREAM/SPL, old cached fees,
+  small fractions, decimal-dot amounts, grouped amounts, and integer fees.
+- Tests: 66 unit + 98 DOM.
+
 ## 0.4.5
 
 - **KuCoin Deposit button no longer opens Page Not Found.** Use `/assets/coin`,

@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/sulthonuladib/tradecat/issues
 // @updateURL    https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
 // @downloadURL  https://raw.githubusercontent.com/sulthonuladib/tradecat/main/dist/tradecat-idr.user.js
-// @version      0.4.5
+// @version      0.4.6
 // @description  IDR price beside every orderbook price, Total (USDT) replaced by IDR volume, plus deposit/withdraw status with chain details and quick Deposit/Withdraw buttons. Works on gate.com, mexc.fm, binance.com, kucoin.com and bybit.com; Indodax gets a compact fee + 1% margin readout.
 // @author       sulthonuladib
 // @license      MIT
@@ -2330,7 +2330,7 @@ coin:
 .foot { display: flex; gap: 6px; align-items: center; font-size: 10px; color: #6e7681; }
 .foot .retry { all: unset; cursor: pointer; color: #58a6ff; margin-left: auto; }
 `;
-  var feeKey = (coin) => `indodax.fee.${coin}`;
+  var feeKey = (coin) => `indodax.fee.v2.${coin}`;
   function parseFeePage(html) {
     if (typeof DOMParser !== "function")
       return { network: null, fee: null, needsLogin: false, at: Date.now() };
@@ -2339,7 +2339,8 @@ coin:
     const netNode = doc.querySelector("#withdraw_network");
     const network = (netNode?.selectedOptions?.[0]?.textContent ?? netNode?.value ?? netNode?.textContent ?? "").trim() || null;
     const feeText = (feeNode?.textContent ?? "").replace(/\s+/g, " ").trim();
-    const fee = feeText ? parseNumber(feeText) : null;
+    const amount = feeText.includes(",") ? feeText.replace(/\./g, "").replace(",", ".") : feeText;
+    const fee = amount ? parseNumber(amount) : null;
     return { network, fee, needsLogin: !feeNode, at: Date.now() };
   }
   async function fetchFeePage(coin) {

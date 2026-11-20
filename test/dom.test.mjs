@@ -226,6 +226,24 @@ async function main() {
     expectContains(login, 'Log in to load network fees', 'mexc shows the login hint');
   }
 
+  console.log('Indodax token withdrawal fees (decimal comma, valued at the token last price)');
+  for (const sample of [
+    { coin: 'SKYAI', network: 'BNB Smart Chain (BEP 20)', fee: '1,105', last: 654, amount: '1,105', rupiah: '722,67' },
+    { coin: 'STREAM', network: 'SOL Token Standart (SPL)', fee: '164,534', last: 146, amount: '164,534', rupiah: '24.022' },
+    { coin: 'SKYAI', network: 'BNB Smart Chain (BEP 20)', fee: '1,105', last: 654, amount: '1,105', rupiah: '722,67', legacyFee: '1105' },
+    { coin: 'BTC', network: 'Bitcoin', fee: '0,0005', last: 1000000000, amount: '0,0005', rupiah: '500.000' },
+    { coin: 'SKYAI', network: 'BNB Smart Chain (BEP 20)', fee: '1.105', last: 654, amount: '1,105', rupiah: '722,67' },
+    { coin: 'STREAM', network: 'SOL Token Standart (SPL)', fee: '1.234,567', last: 146, amount: '1.234,567', rupiah: '180.247' },
+    { coin: 'STREAM', network: 'SOL Token Standart (SPL)', fee: '2', last: 146, amount: '2', rupiah: '292' },
+  ]) {
+    const query = new URLSearchParams({ fixture: 'indodax', network: sample.network, fee: sample.fee, last: String(sample.last), ask: String(sample.last + 1) });
+    if (sample.legacyFee) query.set('legacyFee', sample.legacyFee);
+    const html = await dumpDom(`/market/${sample.coin}IDR?${query}`);
+    expectContains(html, `&quot;fee&quot;:&quot;Rp. ${sample.rupiah}&quot;`, `${sample.coin}: fee amount × token last price`);
+    expectContains(html, `${sample.amount} ${sample.coin} × Rp. ${sample.last.toLocaleString('id-ID')}`, `${sample.coin}: tooltip keeps the token unit and last price`);
+    expectContains(html, `&quot;net&quot;:&quot;${sample.network}&quot;`, `${sample.coin}: network label`);
+  }
+
   console.log('coin panel host is mounted on a pair page');
   {
     const html = await dumpDom(`/trade/BTC_USDT?rate=${RATE}&site=gate`);

@@ -82,7 +82,8 @@ interface FeeInfo {
   at: number;
 }
 
-const feeKey = (coin: string): string => `indodax.fee.${coin}`;
+// v2 discards fees cached before the decimal-comma parsing fix.
+const feeKey = (coin: string): string => `indodax.fee.v2.${coin}`;
 
 function parseFeePage(html: string): FeeInfo {
   if (typeof DOMParser !== 'function') return { network: null, fee: null, needsLogin: false, at: Date.now() };
@@ -92,7 +93,11 @@ function parseFeePage(html: string): FeeInfo {
   const network =
     (netNode?.selectedOptions?.[0]?.textContent ?? netNode?.value ?? netNode?.textContent ?? '').trim() || null;
   const feeText = (feeNode?.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const fee = feeText ? parseNumber(feeText) : null;
+  // Finance uses Indonesian amounts: a comma is always decimal, even with
+  // three trailing digits (1,105 tokens, not 1105). Do not apply the generic
+  // exchange parser's comma-as-thousands heuristic to this localized field.
+  const amount = feeText.includes(',') ? feeText.replace(/\./g, '').replace(',', '.') : feeText;
+  const fee = amount ? parseNumber(amount) : null;
   return { network, fee, needsLogin: !feeNode, at: Date.now() };
 }
 

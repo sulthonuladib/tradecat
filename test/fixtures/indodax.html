@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Indodax fee fixture</title>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    window.__TRADECAT_SITE__ = 'indodax';
+    window.__GM__ = { 'idr.rate': 18500, 'idr.updatedAt': Date.now() };
+    if (params.has('legacyFee')) {
+      var coin = location.pathname.split('/').pop().replace(/IDR$/, '');
+      // A fresh pre-fix cache must not survive the parsing correction.
+      window.__GM__['indodax.fee.' + coin] = {
+        network: params.get('network'), fee: Number(params.get('legacyFee')), needsLogin: false, at: Date.now()
+      };
+    }
+    window.GM_getValue = function (key, fallback) {
+      return Object.prototype.hasOwnProperty.call(window.__GM__, key) ? window.__GM__[key] : fallback;
+    };
+    window.GM_setValue = function (key, value) { window.__GM__[key] = value; };
+    window.GM_registerMenuCommand = function () {};
+    window.GM_xmlhttpRequest = function (details) {
+      var url = new URL(details.url);
+      var response;
+      if (url.pathname.startsWith('/finance/')) {
+        response = '<select id="withdraw_network"><option selected>' + params.get('network') + '</option></select>' +
+          '<span id="withdraw_fee_value">' + params.get('fee') + '</span>';
+      } else if (url.pathname.startsWith('/api/ticker/')) {
+        response = JSON.stringify({ ticker: { last: params.get('last'), sell: params.get('ask') || params.get('last') } });
+      } else {
+        details.onerror();
+        return;
+      }
+      details.onload({ status: 200, responseText: response });
+    };
+  })();
+</script>
+</head>
+<body>
+<script src="/dist/tradecat-idr.user.js"></script>
+<script>
+  // --dump-dom does not include shadow roots; mirror only the rendered values.
+  setTimeout(function () {
+    var host = document.getElementById('tradecat-simple-host');
+    var root = host && host.shadowRoot;
+    var result = {};
+    ['price', 'margin', 'net', 'fee'].forEach(function (key) {
+      var node = root && root.querySelector('.v.' + key);
+      result[key] = node ? node.textContent : null;
+      result[key + 'Title'] = node ? node.title : null;
+    });
+    document.documentElement.setAttribute('data-tc-simple', JSON.stringify(result));
+  }, 3000);
+</script>
+</body>
+</html>
